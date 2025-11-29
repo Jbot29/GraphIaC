@@ -1,3 +1,6 @@
 networkx
 boto3
 pydantic
+colorlog
+deepdiff
+pytz

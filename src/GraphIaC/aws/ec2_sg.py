@@ -18,7 +18,12 @@ class SecurityGroup(BaseNode):
     vpc_id: str
     arn: Optional[str] = None
 
-    def read(self,session):
+    @property
+    def read_id(self) -> Optional[str]:
+        return self.sg_id
+
+
+    def read(self,session,G,g_id,read_id):
         status, sg_data = security_group_read(session,self.sg_id)
         return SecurityGroup(g_id=self.g_id,sg_id=sg_data['GroupId'],desc="",vpc_id="",arn=sg_data['SecurityGroupArn'])
         

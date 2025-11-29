@@ -15,7 +15,10 @@ classifiers = [
 dependencies = [
   "networkx",
   "boto3",
-  "pydantic"
+  "pydantic",
+  "colorlog",
+  "deepdiff",
+  "pytz"
 ]
 
 [project.urls]

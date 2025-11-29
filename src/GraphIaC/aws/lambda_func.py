@@ -11,11 +11,12 @@ from .iam_role import IAMRolePolicyEdge
 
 #TODO fix region
 
+#from gbase import GBase
 
 class IAMRolePolicyLambdaEdge(IAMRolePolicyEdge):
     policy_arn: str = "arn:aws:iam::aws:policy/AWSLambdaBasicExecutionRole"
 
-class LambdaZipFile(BaseNode):
+class LambdaZipFile(BaseModel):
     g_id: str
     name: AwsName
     runtime: str
@@ -25,7 +26,11 @@ class LambdaZipFile(BaseNode):
     timeout: Optional[int] = 15
     memory_size: Optional[int] = 128
     publish: Optional[bool] = True
-    
+
+    @property
+    def read_id(self) -> Optional[str]:
+        return self.name
+
     def exists(self,session):
         if lambda_exists(session, self.name):
             return True
@@ -51,7 +56,7 @@ class LambdaZipFile(BaseNode):
         
         return lambda_create(session,self.name,self.runtime,iam_role.arn,self.handler,self.description,self.timeout,self.memory_size,self.publish,self.zip_file_path)
 
-    def read(self, session,G):
+    def read(self, session,G,g_id,read_id):
         # cloned = self.copy(deep=True)
         response = lambda_read(session,self.name)
         if not response:

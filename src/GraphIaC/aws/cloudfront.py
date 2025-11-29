@@ -11,12 +11,12 @@ from botocore.exceptions import ClientError
 
 from pydantic import BaseModel
 from typing import Optional,List
+from gbase import GBase
 
 class CacheBehavior(DefaultCacheBehavior):
     PathPattern: str
 
-class CloudfrontDistribution(BaseModel):
-    g_id: str    
+class CloudfrontDistribution(GBase):
     distribution_id: str
     arn: str
     

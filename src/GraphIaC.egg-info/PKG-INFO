@@ -1,4 +1,4 @@
-Metadata-Version: 2.2
+Metadata-Version: 2.4
 Name: GraphIaC
 Version: 0.0.1
 Summary: GraphIaC
@@ -13,6 +13,9 @@ Description-Content-Type: text/markdown
 Requires-Dist: networkx
 Requires-Dist: boto3
 Requires-Dist: pydantic
+Requires-Dist: colorlog
+Requires-Dist: deepdiff
+Requires-Dist: pytz
 
 # GraphIaC
 

@@ -1,6 +1,0 @@
-README.md
-setup.py
-GraphIOC.egg-info/PKG-INFO
-GraphIOC.egg-info/SOURCES.txt
-GraphIOC.egg-info/dependency_links.txt
-GraphIOC.egg-info/top_level.txt

@@ -7,7 +7,8 @@ from pydantic import validator
 from typing import Optional,List, Any
 from botocore.exceptions import ClientError
 import sqlite3
-
+import logging
+import colorlog
 from .db import create_tables,get_node_by_id,get_edge_by_id,db_create_node,db_get_rows_not_in_list,db_delete_row
 
 from GraphIaC.aws.route53 import HostedZone
@@ -77,7 +78,7 @@ def plan(state):
         pn = state.G.nodes[node]['data']
         print(pn.g_id)
 
-        current_state = pn.read(state.session,state.G)
+        current_state = pn.read(state.session,state.G,g_id=pn.g_id,read_id=pn.read_id)
         
         if not current_state:
             print("Doesn't exist in AWS")
@@ -90,12 +91,13 @@ def plan(state):
 
         #it exists in aws does it exist in db and is it different
         pn_db_row = get_node_by_id(state.db_conn,pn.g_id)
-
+        print("DB ROW:",pn_db_row)
         if not pn_db_row:
             #add to db
             create_op = Operation(operation=OperationType.IMPORT,obj=pn)
             plan_ops.append(create_op)
-
+            continue
+            
 
         db_nodes_seen.append(str(pn_db_row[0]))
         pn_last = load_model_from_db(state,pn_db_row[2],pn_db_row[3])
@@ -158,6 +160,7 @@ def run(state):
 
         elif change.operation == OperationType.IMPORT:
             #add the obj to the db
+            print(f"IMPORT DB  {change.obj}")
             db_create_node(state.db_conn,change.obj)            
         elif change.operation == OperationType.UPDATE:
             print(f"Update: {change.obj}")
@@ -203,5 +206,8 @@ def walk_graph(G):
             edge = G.edges[node,e]
             print(f"\t{edge}")
         """
+
+
+
 
 

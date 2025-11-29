@@ -1,23 +1,32 @@
 from pydantic import BaseModel
 
+from deepdiff import DeepDiff
+
+
 class BaseNode(BaseModel):
     g_id: str    
 
-    def exists(self,session):
-        pass
-
     def create(self,session,G):
         pass
-    
-    def read(self,session):
+
+    @classmethod
+    def read(self,session,G,g_id,read_id):
         pass
 
     def update(self,session,G):
         pass
     def delete(self,session,G):
         pass
+    
     def diff(self,session,G,diff_object):
-        pass
+
+        if not isinstance(diff_object, self.__class__):
+            return False
+
+
+        return DeepDiff(self.model_dump(), diff_object.model_dump())
+
+
 
     def export(self):
 

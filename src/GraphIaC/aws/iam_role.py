@@ -13,6 +13,9 @@ class IAMRole(BaseModel):
     policy: dict
     arn: Optional[str] = None    
 
+    @property
+    def read_id(self) -> Optional[str]:
+        return self.name
 
     def exists(self,session):
         print(f"{self.__class__.__name__}: Exists {self}")
@@ -31,7 +34,7 @@ class IAMRole(BaseModel):
         return True
 
 
-    def read(self,session,G):
+    def read(self,session,G,g_id,read_id):
         #cloned = self.copy(deep=True)
         role_arn,policies = role_read(session,self.name)
         print("READ IAM ROLE",role_arn,policies)
