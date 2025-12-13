@@ -1,8 +1,9 @@
 
 import sqlite3
 import json
-from pydantic import BaseModel
 
+from pydantic import BaseModel, Field
+from typing import Any
 #load from db
 #dog = Dog.model_validate(from_json(partial_dog_json, allow_partial=True))
 """
@@ -20,36 +21,58 @@ print("Model from JSON (using parse_obj):", model_from_dict)
 #turn tables into Pydantic models
 
 
-class NodeTable(BaseModel):
+class TableNode(BaseModel):
+    id: int | None = Field(default=None)
+    g_id: str
+    type: str
+    data: Any
     __tablename__ = 'nodes'
 
+    @classmethod
+    def create_table_sql(cls) -> str:
+        return """
+        CREATE TABLE IF NOT EXISTS nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            g_id TEXT UNIQUE,
+            type TEXT,
+            data JSON
+        );
+        """    
+class TableEdge(BaseModel):
+    id: int | None = Field(default=None)
+    g_id: str | None = None        # UNIQUE text ID
+    source: int                    # FK → nodes.id
+    destination: int               # FK → nodes.id
+    weight: float | None = None
+    type: str | None = None
+    data: Any = None               # JSON payload
 
+    @classmethod
+    def create_table_sql(cls) -> str:
+        return """
+        CREATE TABLE IF NOT EXISTS edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            g_id TEXT UNIQUE,
+            source INTEGER NOT NULL,
+            destination INTEGER NOT NULL,
+            weight REAL,
+            type TEXT,
+            data JSON,
+            FOREIGN KEY (source) REFERENCES nodes(id) ON DELETE CASCADE,
+            FOREIGN KEY (destination) REFERENCES nodes(id) ON DELETE CASCADE,
+            UNIQUE(source, destination)
+        );
+        """
 
+    
 def create_tables(conn):
     cursor = conn.cursor()
-    
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS nodes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE,
-        type TEXT,
-        data JSON
-    )
-    ''')
 
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS edges (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        source INTEGER NOT NULL,
-        destination INTEGER NOT NULL,
-        weight REAL,
-        type TEXT,
-        data JSON,
-        FOREIGN KEY (source) REFERENCES nodes(id) ON DELETE CASCADE,
-        FOREIGN KEY (destination) REFERENCES nodes(id) ON DELETE CASCADE,
-        UNIQUE(source, destination)
-    )
-    ''')
+    sql = TableNode.create_table_sql()
+    cursor.execute(sql)
+
+    sql = TableEdge.create_table_sql()
+    cursor.execute(sql)
 
     conn.commit()
 
@@ -65,7 +88,7 @@ def db_create_node(conn,node):
     try:
         # Insert a new row into the table
         cursor.execute('''
-            INSERT INTO nodes (name, type, data)
+            INSERT INTO nodes (g_id, type, data)
             VALUES (?, ?, ?)
         ''', (node_name, node_type, node_data))
         
@@ -86,7 +109,7 @@ def get_node_by_id(conn,name):
     try:
         # Execute the query to find the node's ID by name
         cursor.execute('''
-            SELECT * FROM nodes WHERE name = ?
+            SELECT * FROM nodes WHERE g_id = ?
         ''', (name,))
         
         # Fetch the result
@@ -126,12 +149,15 @@ def get_edge_by_id(conn,s_name,d_name):
         print(f"Error: {e}")
 
         
-def add_edge(source_name, destination_name, edge,weight=None):
+def db_create_edge(conn,source_name, destination_name, edge,weight=1):
     edge_type = edge.__class__.__name__
     edge_data = edge.model_dump_json()
 
-    source = get_node_id(source_name)
-    destination = get_node_id(destination_name)
+    source = get_node_by_id(conn,source_name)[0]
+    destination = get_node_by_id(conn,destination_name)[0]
+    print("E")
+    print(source, destination, weight, edge_type,edge_data)
+    cursor = conn.cursor()
     try:
         cursor.execute('''
             INSERT INTO edges (source, destination, weight, type,data)
@@ -156,7 +182,7 @@ def name_exists(name):
     
     # Execute a query to check for the existence of the name
     cursor.execute('''
-        SELECT EXISTS(SELECT 1 FROM my_table WHERE name = ?)
+        SELECT EXISTS(SELECT 1 FROM my_table WHERE g_id = ?)
     ''', (name,))
     
     # Fetch the result (0 or 1)

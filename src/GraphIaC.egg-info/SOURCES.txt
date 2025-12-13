@@ -3,6 +3,7 @@ pyproject.toml
 src/GraphIaC/__init__.py
 src/GraphIaC/__main__.py
 src/GraphIaC/db.py
+src/GraphIaC/logs.py
 src/GraphIaC/main.py
 src/GraphIaC/model_map.py
 src/GraphIaC/models.py
@@ -40,3 +41,4 @@ src/GraphIac/aws/lambda_func.py
 src/GraphIac/aws/route53.py
 src/GraphIac/aws/s3.py
 src/GraphIac/aws/types.py
+tests/test_pydantic.py

@@ -168,6 +168,19 @@ class DynamoTable(BaseNode):
         
         return True
 
+    def delete(self, session, G):
+
+        dynamodb = session.client("dynamodb", region_name=self.region)        
+
+        try:
+            resp = dynamodb.delete_table(TableName=self.table_name)
+            waiter = dynamodb.get_waiter("table_not_exists")
+            waiter.wait(TableName=self.table_name)
+            return resp
+        except ClientError as e:
+            raise
+
+        return None
 '''
 
 
@@ -294,22 +307,6 @@ class DynamoTable(BaseModel):
         try:
             resp = dynamodb.describe_table(TableName=self.name)
             return resp["Table"]
-        except ClientError as e:
-            raise
-
-    def delete(self, client=None, wait: bool = True) -> Dict:
-        """
-        Delete the table from AWS.
-
-        Optionally waits until the table is gone.
-        """
-        dynamodb = self._client(client)
-        try:
-            resp = dynamodb.delete_table(TableName=self.name)
-            if wait:
-                waiter = dynamodb.get_waiter("table_not_exists")
-                waiter.wait(TableName=self.name)
-            return resp
         except ClientError as e:
             raise
 

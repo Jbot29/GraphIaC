@@ -2,12 +2,13 @@ import boto3
 import time
 import json
 from botocore.exceptions import ClientError
-from pydantic import BaseModel,constr
+from pydantic import BaseModel,constr,Field,AliasChoices
 from typing import Optional,List
+from GraphIaC.models import BaseNode,BaseEdge
 
 from .types import AwsName
 
-class IAMRole(BaseModel):
+class IAMRole(BaseNode):
     g_id: str
     name: AwsName
     policy: dict
@@ -45,18 +46,29 @@ class IAMRole(BaseModel):
     
     def update(self,session,G):
         pass
+
     def delete(self,session,G):
-        pass
+        delete_iam_role(session,self.name)
 
     def diff(self,session,G,diff_object):
         return False
     
 
-class IAMRolePolicyEdge(BaseModel):
-    role_g_id: str
-    node_g_id: str
+class IAMRolePolicyEdge(BaseEdge):
+    role_g_id: str 
+    node_g_id: str  
+
     policy_arn: str
 
+    @property
+    def source_g_id(self) -> str:
+        print("WHAT")
+        return self.role_g_id
+    
+    @property
+    def destination_g_id(self) -> str:
+        return self.node_g_id
+    
     def exists(self,session):
         pass
 
@@ -142,3 +154,37 @@ def role_has_policy(session,role_name,policy_arn):
     pass
 
 """
+
+
+def delete_iam_role(session,role_name: str):
+    iam = session.client('iam')
+    # 1. Detach managed policies
+    attached = iam.list_attached_role_policies(RoleName=role_name)
+    for p in attached.get("AttachedPolicies", []):
+        print(f"Detaching managed policy: {p['PolicyArn']}")
+        iam.detach_role_policy(RoleName=role_name, PolicyArn=p["PolicyArn"])
+
+    # 2. Delete inline policies
+    inline = iam.list_role_policies(RoleName=role_name)
+    for policy_name in inline.get("PolicyNames", []):
+        print(f"Deleting inline policy: {policy_name}")
+        iam.delete_role_policy(RoleName=role_name, PolicyName=policy_name)
+
+    # 3. Remove from instance profiles
+    profiles = iam.list_instance_profiles_for_role(RoleName=role_name)
+    for profile in profiles.get("InstanceProfiles", []):
+        profile_name = profile["InstanceProfileName"]
+        print(f"Removing role from instance profile: {profile_name}")
+        iam.remove_role_from_instance_profile(
+            InstanceProfileName=profile_name,
+            RoleName=role_name,
+        )
+
+    # 4. Delete the role
+    print(f"Deleting role: {role_name}")
+    iam.delete_role(RoleName=role_name)
+
+    print("Done.")
+
+# Usage:
+

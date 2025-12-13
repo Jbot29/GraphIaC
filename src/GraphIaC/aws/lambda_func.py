@@ -16,9 +16,9 @@ from .iam_role import IAMRolePolicyEdge
 class IAMRolePolicyLambdaEdge(IAMRolePolicyEdge):
     policy_arn: str = "arn:aws:iam::aws:policy/AWSLambdaBasicExecutionRole"
 
-class LambdaZipFile(BaseModel):
-    g_id: str
+class LambdaZipFile(BaseNode):
     name: AwsName
+    region: str = "us-east-2"    
     runtime: str
     handler:str 
     zip_file_path: str
@@ -32,7 +32,7 @@ class LambdaZipFile(BaseModel):
         return self.name
 
     def exists(self,session):
-        if lambda_exists(session, self.name):
+        if lambda_exists(session, self.name,self.region):
             return True
         return False
 
@@ -54,11 +54,11 @@ class LambdaZipFile(BaseModel):
         iam_role = G.nodes[role_edge.role_g_id]['data']
             
         
-        return lambda_create(session,self.name,self.runtime,iam_role.arn,self.handler,self.description,self.timeout,self.memory_size,self.publish,self.zip_file_path)
+        return lambda_create(session,self.name,self.runtime,iam_role.arn,self.handler,self.description,self.timeout,self.memory_size,self.publish,self.zip_file_path,self.region)
 
     def read(self, session,G,g_id,read_id):
         # cloned = self.copy(deep=True)
-        response = lambda_read(session,self.name)
+        response = lambda_read(session,self.name,self.region)
         if not response:
             return None
         
@@ -89,8 +89,8 @@ class LambdaZipFile(BaseModel):
 
 
 
-def lambda_exists(session, function_name):
-    lambda_client = session.client('lambda',region_name='us-east-1')
+def lambda_exists(session, function_name,region):
+    lambda_client = session.client('lambda',region_name=region)
     try:
         # Attempt to retrieve the Lambda function configuration
         response = lambda_client.get_function(FunctionName=function_name)
@@ -104,8 +104,8 @@ def lambda_exists(session, function_name):
 
         
 
-def lambda_create(session,function_name,runtime,role_arn,handler,description,timeout,memory_size,publish,zip_file_name):
-    lambda_client = session.client('lambda',region_name='us-east-1')
+def lambda_create(session,function_name,runtime,role_arn,handler,description,timeout,memory_size,publish,zip_file_name,region):
+    lambda_client = session.client('lambda',region_name=region)
     # Read zip file bytes
     with open(zip_file_name, 'rb') as f:
         zip_bytes = f.read()
@@ -208,8 +208,8 @@ lambda_client.delete_function(FunctionName='MyFirstLambdaFunction')
 import boto3
 from typing import Optional
 
-def lambda_read(session,func_name):
-    lambda_client = session.client('lambda',region_name='us-east-1')
+def lambda_read(session,func_name,region):
+    lambda_client = session.client('lambda',region_name=region)
 
 
     try:

@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 from deepdiff import DeepDiff
-
+from typing import Optional, Literal, Dict
 
 class BaseNode(BaseModel):
     g_id: str    
@@ -9,6 +9,10 @@ class BaseNode(BaseModel):
     def create(self,session,G):
         pass
 
+    @property
+    def read_id(self) -> Optional[str]:
+        return None
+    
     @classmethod
     def read(self,session,G,g_id,read_id):
         pass
@@ -28,7 +32,7 @@ class BaseNode(BaseModel):
 
 
 
-    def export(self):
+    def import_from_provider(self):
 
         class_name = self.__class__.__name__
         # Build a comma-separated list of key=value pairs using repr(value)
@@ -40,9 +44,20 @@ class BaseNode(BaseModel):
         return f"{class_name}({fields_str})"    
 
 class BaseEdge(BaseModel):
-    node_1_g_id: str
-    node_2_g_id: str
+    #g_id: str
+    #source_g_id: str 
+    #destination_g_id: str     
+    #node_1_g_id: str
+    #node_2_g_id: str
 
+    @property
+    def source_g_id(self):
+        return None
+    
+    @property
+    def destination_g_id(self):
+        return None
+    
     def exists(self,session):
         pass
 

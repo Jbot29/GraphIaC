@@ -5,64 +5,7 @@ import boto3
 import GraphIaC
 import sqlite3
 from .db import create_tables
-
-import logging
-import colorlog
-
-def setup_logger(level=logging.INFO):
-    """
-    Sets up a colorized logger using colorlog.
-    Returns a configured `logging.Logger`.
-    """
-    # Create a logger
-    logger = logging.getLogger("GraphIaC")
-    logger.setLevel(level)
-    logger.propagate = False
-    # Create a stream handler (stdout)
-    handler = colorlog.StreamHandler()
-    
-    # Define color scheme for each log level
-    formatter = colorlog.ColoredFormatter(
-        "%(log_color)s%(levelname)-8s%(reset)s | %(blue)s%(name)s: %(reset)s%(message_log_color)s%(message)s",
-        datefmt=None,
-        reset=True,
-        log_colors={
-    "DEBUG":    "cyan",
-    "INFO":     "bold_white",
-    "PLAN":     "bold_green",
-    "WARNING":  "bold_yellow",
-    "ERROR":    "bold_red",
-    "CRITICAL": "bg_red",
-        },
-        secondary_log_colors={
-            # You can define secondary colors used in the message with `%(message_log_color)s`
-            "message": {
-                "DEBUG":    "cyan",
-                "INFO":     "white",
-                "WARNING":  "yellow",
-                "ERROR":    "red",
-                "CRITICAL": "red",
-            }
-        },
-        style="%"
-    )
-    
-    
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-
-    PLAN_LVL = 25  # between INFO(20) and WARNING(30)
-    logging.addLevelName(PLAN_LVL, "PLAN")
-    
-    def plan(self, message, *args, **kws):
-        if self.isEnabledFor(PLAN_LVL):
-            self._log(PLAN_LVL, message, args, **kws)
-
-    logging.Logger.plan = plan
-    
-    return logger
-
-
+from .logs import setup_logger
 
 logger = setup_logger()
 
@@ -115,7 +58,10 @@ def plan(profile,db_conn,user_infra_module):
 
     changes = GraphIaC.plan(gioc)
 
-    print(changes)
+    logger.info(f"Changes:")
+    for change in changes:
+        logger.info(f"\tChange: {change.operation} {change.obj}")
+
 
     return
 
