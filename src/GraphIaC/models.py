@@ -58,7 +58,7 @@ class BaseEdge(BaseModel):
     def destination_g_id(self):
         return None
     
-    def exists(self,session):
+    def read(self,session):
         pass
 
     def create(self,session,G):
@@ -68,3 +68,12 @@ class BaseEdge(BaseModel):
         pass
     def delete(self,session,G):
         pass
+
+    def diff(self,session,G,diff_object):
+
+        if not isinstance(diff_object, self.__class__):
+            return False
+
+
+        return DeepDiff(self.model_dump(), diff_object.model_dump())
+    

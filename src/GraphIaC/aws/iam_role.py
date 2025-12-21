@@ -8,10 +8,29 @@ from GraphIaC.models import BaseNode,BaseEdge
 
 from .types import AwsName
 
+from .iam_policy import IamPolicyDocument,IamTrustPolicyDocument
+"""
+IAM Role
+│
+├── Trust Policy (1 per role)
+│     - who can assume the role?
+│     - lambda.amazonaws.com must be here for Lambdas
+│
+├── Inline Policies (0..many)
+│     - precise, granular permissions
+│     - perfect for GraphIaC edges
+│
+└── Managed Policies (0..many)
+      - prebuilt or reusable
+
+"""
+
+
 class IAMRole(BaseNode):
     g_id: str
     name: AwsName
-    policy: dict
+    trust_policy: Optional[IamTrustPolicyDocument] = None
+    inline_policy: Optional[IamPolicyDocument] = None
     arn: Optional[str] = None    
 
     @property
@@ -26,7 +45,7 @@ class IAMRole(BaseNode):
 
     def create(self,session,G):
         print(f"{self.__class__.__name__}: Create {self}")
-        role_arn = role_create(session,self.name,self.policy)
+        role_arn = role_create(session,self.name,self.trust_policy)
 
         if not role_arn:
             return False
@@ -38,11 +57,11 @@ class IAMRole(BaseNode):
     def read(self,session,G,g_id,read_id):
         #cloned = self.copy(deep=True)
         role_arn,policies = role_read(session,self.name)
-        print("READ IAM ROLE",role_arn,policies)
+
         if not role_arn:
             return None
         
-        return IAMRole(g_id=self.g_id, name=self.name, policy=policies, arn=role_arn)
+        return IAMRole(g_id=self.g_id, name=self.name, trust_policy=policies, arn=role_arn)
     
     def update(self,session,G):
         pass
@@ -56,20 +75,23 @@ class IAMRole(BaseNode):
 
 class IAMRolePolicyEdge(BaseEdge):
     role_g_id: str 
-    node_g_id: str  
+    node_g_id: Optional[str] = None
 
-    policy_arn: str
+    policy_arn: Optional[str] = None
 
     @property
+    def policy_name(self) -> str:
+        return f"IAMRolePolicyEdge-{self.role_g_id}-{self.node_g_id}"
+    
+    @property
     def source_g_id(self) -> str:
-        print("WHAT")
         return self.role_g_id
     
     @property
     def destination_g_id(self) -> str:
         return self.node_g_id
     
-    def exists(self,session):
+    def read(self,session):
         pass
 
     def create(self,session,G):
@@ -79,6 +101,21 @@ class IAMRolePolicyEdge(BaseEdge):
         pass
     def delete(self,session,G):
         pass
+
+class IAMRoleInlinePolicyEdge(BaseEdge):
+    role_g_id: str 
+    
+    @property
+    def policy_name(self) -> str:
+        return f"IAMRolePolicyEdge-{self.source_g_id}-{self.destination_g_id}"
+    
+    @property
+    def source_g_id(self):
+        return None
+    
+    @property
+    def destination_g_id(self):
+        return None
 
 
 
@@ -95,6 +132,7 @@ def role_exists(session,role_name):
 
     return True
 
+"""
 def role_create(session,role_name,policy_document):
     iam_client = session.client('iam')
 
@@ -105,7 +143,37 @@ def role_create(session,role_name,policy_document):
     )
     role_arn = create_role_response['Role']['Arn']
     return role_arn
+"""
 
+def role_create(session, role_name, policy_document, wait=True, max_wait_seconds=30):
+    iam_client = session.client("iam")
+
+    create_role_response = iam_client.create_role(
+        RoleName=role_name,
+        AssumeRolePolicyDocument=json.dumps(policy_document),
+        Description="Role for Lambda execution",
+    )
+    role_arn = create_role_response["Role"]["Arn"]
+
+    if wait:
+        # First: wait until the role is visible
+        iam_client.get_waiter("role_exists").wait(RoleName=role_name)
+
+        # Then: give IAM a bit of time to propagate the trust policy
+        # and be assumable by Lambda
+        deadline = time.time() + max_wait_seconds
+        while True:
+            try:
+                # Dumb-but-effective: just call get_role in a loop.
+                # If IAM returns it without errors, assume it's propagated enough.
+                iam_client.get_role(RoleName=role_name)
+                break  # good enough
+            except ClientError:
+                if time.time() >= deadline:
+                    raise
+                time.sleep(2)  # small backoff
+
+    return role_arn
 
 
 def role_read(session,role_name):

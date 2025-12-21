@@ -49,8 +49,10 @@ def add_node(state,node):
     state.G.add_node(node.g_id, data=node)
 
 
-def add_edge(state,a,b,edge):
-    state.G.add_edge(a.g_id,b.g_id,data=edge)
+#def add_edge(state,a,b,edge):
+def add_edge(state,edge):
+    
+    state.G.add_edge(edge.source_g_id,edge.destination_g_id,data=edge)
     
 
 class OperationType(Enum):
@@ -80,12 +82,10 @@ def plan(state):
     db_edges_seen = []
     
     for node in state.G.nodes:
-        print(f"Node: {node}")
-
         pn = state.G.nodes[node]['data']
-        print(f"PN:{pn}")
-        print(pn.g_id)
 
+        logger.info(f"Node: {node} PN:{pn}")
+        
         current_state = pn.read(state.session,state.G,g_id=pn.g_id,read_id=pn.read_id)
         
         if not current_state:
@@ -97,7 +97,7 @@ def plan(state):
         
         #it exists in aws does it exist in db and is it different
         pn_db_row = get_node_by_id(state.db_conn,pn.g_id)
-        print("DB ROW:",pn_db_row)
+
         if not pn_db_row:
             #add to db
             create_op = Operation(operation=OperationType.IMPORT,obj=pn)
@@ -109,33 +109,43 @@ def plan(state):
         pn_last = load_model_from_db(state,pn_db_row[2],pn_db_row[3])
         
         #diff with saved state
-        print("DIFF")
+
+        print("DIFF:")
+        print(pn_last)
+        print(current_state)
         if pn.diff(state.session,state.G,current_state) or pn.diff(state.session,state.G,pn_last):
-            print("Update needed")
+            logger.info("Update needed")
+            #TODO print a detailed diff
             update_op = Operation(operation=OperationType.UPDATE,obj=pn)
             plan_ops.append(update_op)
 
-            
         state.G.nodes[node]['data'] = current_state
 
 
     #for node in state.G.nodes:
     for edge in list(state.G.edges(data=True)):
         
-        print(f"Run EDGE updates: {edge}")
+        logger.info(f"Run EDGE updates: {edge}")
         edge_data = edge[2]["data"]
-        print(edge_data)
-        source_id = get_node_by_id(state.db_conn,edge[0])[0]
-        destination_id = get_node_by_id(state.db_conn,edge[1])[0]
+        edge_id = None
+
+        #does it already exist in Cloud
+        edge_data.read(state.session,state.G)
         
-        edge_id = get_edge_by_id(state.db_conn,source_id,destination_id)
-        print("EDGE id:",edge_id)
+        source_id = get_node_by_id(state.db_conn,edge[0])
+        destination_id = get_node_by_id(state.db_conn,edge[1])
+
+        if source_id and destination_id:
+            edge_id = get_edge_by_id(state.db_conn,source_id[0],destination_id[0])
 
         if not edge_id:
             logger.info(f"CREATE EDGE: {edge_data.source_g_id} -> {edge_data.destination_g_id}")
             create_op = Operation(operation=OperationType.CREATE_EDGE,obj=edge_data)
             
             plan_ops.append(create_op)
+        else:
+            edge_data.read(state.session,state.G)
+        
             
         """
         for e in state.G.neighbors(node):
@@ -159,9 +169,9 @@ def plan(state):
 
     #check for deleted items
     for orphaned_node in db_get_rows_not_in_list(state.db_conn, "nodes", db_nodes_seen):
-        print("ORPHANDED Node:",orphaned_node)
+        logger.info("ORPHANDED Node:",orphaned_node)
         on_last = load_model_from_db(state,orphaned_node[2],orphaned_node[3])
-        print(on_last)
+
 
         delete_op = Operation(operation=OperationType.DELETE,obj=on_last)
         plan_ops.append(delete_op)
@@ -199,6 +209,7 @@ def run(state):
             db_delete_row(state.db_conn,"nodes",row_id)
         elif change.operation == OperationType.CREATE_EDGE:
             print(f"Create EDGE: {change.obj}")
+            result = change.obj.create(state.session,state.G)
             db_create_edge(state.db_conn,change.obj.source_g_id,change.obj.destination_g_id,change.obj)
             
         

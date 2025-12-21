@@ -8,14 +8,52 @@ from ..models import BaseNode
 
 from .types import AwsName
 from .iam_role import IAMRolePolicyEdge
+from .iam_policy import IamTrustPolicyStatement,get_trust_policy_for_role
+# TODO: Zipfile compare sha
 
-#TODO fix region
+assume_role_policy_document = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {
+                    "Service": "lambda.amazonaws.com"
+                },
+                "Action": "sts:AssumeRole"
+            }
+        ]
+    }
 
-#from gbase import GBase
+stmt = IamTrustPolicyStatement(
+    Sid="GraphIaCTrust:lambda",
+    Effect="Allow",
+    Principal={"Service": "lambda.amazonaws.com"},
+    Action="sts:AssumeRole",
+)
+
+
+#upsert_trust_statement_for_role(session, role_name="MyLambdaRole", statement=stmt)
 
 class IAMRolePolicyLambdaEdge(IAMRolePolicyEdge):
     policy_arn: str = "arn:aws:iam::aws:policy/AWSLambdaBasicExecutionRole"
 
+    def read(self,session,G):
+        role_name = G.nodes[self.role_g_id]['data'].read_id
+        r = get_trust_policy_for_role(session,role_name)
+
+
+    def create(self,session,G):
+        #add the trust relationship
+        pass
+
+    def update(self,session,G):
+        pass
+    def delete(self,session,G):
+        pass
+    
+
+
+    
 class LambdaZipFile(BaseNode):
     name: AwsName
     region: str = "us-east-2"    
@@ -38,7 +76,6 @@ class LambdaZipFile(BaseNode):
 
 
     def create(self,session,G):
-        print("CREATE")
         role_edge = None
         
         incoming_edges = G.in_edges(self.g_id)
@@ -79,7 +116,7 @@ class LambdaZipFile(BaseNode):
 
         
     def update(self,session,G):
-        return lambda_update(session,self)
+        return lambda_update(session,self,self.region)
 
     def delete(self,session,G):
         pass
@@ -236,22 +273,9 @@ def lambda_read(session,func_name,region):
 
 
 
-def lambda_update(
-    session,
-        lambda_config,
-        region_name = "us-east-1"
-):
+def lambda_update(session, lambda_config, region_name):
+    print(f"UPDATE THE LAMBDA: {region_name}")
     lambda_client = session.client('lambda',region_name=region_name)
-    """
-    Checks an existing Lambda function against the provided LambdaZipFile config.
-    If settings differ, update them. Also re-uploads code from 'zip_file_path'.
-    
-    :param session: A boto3 Session with credentials.
-    :param lambda_config: The desired Lambda configuration (name, runtime, handler, etc.).
-    :param region_name: The AWS region in which the Lambda resides.
-    :return: A dict describing actions taken. 
-             For example: {"updated_config": True, "updated_code": True}
-    """
 
     function_name = lambda_config.name
 
@@ -268,6 +292,7 @@ def lambda_update(
         result["error"] = f"Unexpected error accessing Lambda: {e}"
         return result
 
+    print(current)
     # 2. Compare AWS config to local config. We'll build an update dict dynamically.
     config_updates = {}
     
@@ -286,6 +311,7 @@ def lambda_update(
     if current.get("MemorySize") != lambda_config.memory_size:
         config_updates["MemorySize"] = lambda_config.memory_size
 
+    """
     # 3. Update function configuration if needed
     if config_updates:
         try:
@@ -297,30 +323,34 @@ def lambda_update(
         except ClientError as e:
             result["error"] = f"Failed to update Lambda config: {e}"
             return result
-
+    """
     # 4. Re-upload code if the zip is different or if you always want to re-deploy code
     #    (Here, we'll always re-upload to ensure code is in sync with local zip).
     zip_path = lambda_config.zip_file_path
     if not os.path.isfile(zip_path):
         result["error"] = f"Zip file does not exist: {zip_path}"
         return result
+    print(f"RE UPLOAD: {zip_path}")
 
-    try:
-        with open(zip_path, "rb") as f:
-            zip_bytes = f.read()
-        
-        if len(zip_bytes) == 0:
-            result["error"] = f"Zip file is empty: {zip_path}"
-            return result
+    with open(zip_path, "rb") as f:
+        zip_bytes = f.read()
 
-        lambda_client.update_function_code(
-            FunctionName=function_name,
-            ZipFile=zip_bytes,
-            Publish=lambda_config.publish
-        )
-        result["updated_code"] = True
+    if len(zip_bytes) == 0:
+        result["error"] = f"Zip file is empty: {zip_path}"
+        return result
 
-    except ClientError as e:
-        result["error"] = f"Failed to update Lambda code: {e}"
+    print(f"UPDATE FUNCTION CODE: {function_name}")
+    response = lambda_client.update_function_code(
+        FunctionName=function_name,
+        ZipFile=zip_bytes,
+        Publish=lambda_config.publish
+    )
+    #response = lambda_client.get_waiter("function_updated").wait(FunctionName=function_name)
+
+    print("RESPONSE:",response)
+    result["updated_code"] = True
+
+#    except ClientError as e:
+#        result["error"] = f"Failed to update Lambda code: {e}"
 
     return result

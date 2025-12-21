@@ -14,6 +14,10 @@ from pydantic import BaseModel, Field, validator
 import boto3
 from botocore.exceptions import ClientError
 
+from ..logs import setup_logger
+
+logger = setup_logger()
+
 
 BillingMode = Literal["PAY_PER_REQUEST", "PROVISIONED"]
 AttrType = Literal["S", "N", "B"]
@@ -34,10 +38,10 @@ class DynamoTable(BaseNode):
 
     billing_mode: BillingMode = "PAY_PER_REQUEST"
     read_capacity: Optional[int] = Field(
-        5, description="Only used when billing_mode=PROVISIONED"
+        0, description="Only used when billing_mode=PROVISIONED"
     )
     write_capacity: Optional[int] = Field(
-        5, description="Only used when billing_mode=PROVISIONED"
+        0, description="Only used when billing_mode=PROVISIONED"
     )
 
     tags: Dict[str, str] = Field(default_factory=dict)
@@ -46,21 +50,26 @@ class DynamoTable(BaseNode):
     def read_id(self) -> Optional[str]:
         return self.table_name
 
+    def read_arn(self,session):
+        dynamodb = session.client("dynamodb",region_name=self.region)
+
+        resp = dynamodb.describe_table(TableName=self.table_name)
+        return resp["Table"]["TableArn"]
+
     @classmethod
     def read(self,session,G,g_id,read_id,region="us-east-2"):
         
-        print(f"{self.__class__.__name__}: Exists {self}")
+        logger.info(f"{self.__class__.__name__}: Exists {self}")
         dynamodb = session.client("dynamodb",region_name=region)
     
         try:
             resp = dynamodb.describe_table(TableName=read_id)
-            return True
         except dynamodb.exceptions.ResourceNotFoundException:
-            return False
-        
+            return None
+
         # Extract keys
-        key_schema = resp["KeySchema"]
-        attr_defs = {a["AttributeName"]: a["AttributeType"] for a in resp["AttributeDefinitions"]}
+        key_schema = resp['Table']["KeySchema"]
+        attr_defs = {a["AttributeName"]: a["AttributeType"] for a in resp['Table']["AttributeDefinitions"]}
 
         hash_def = next(k for k in key_schema if k["KeyType"] == "HASH")
         range_def = next((k for k in key_schema if k["KeyType"] == "RANGE"), None)
@@ -77,17 +86,18 @@ class DynamoTable(BaseNode):
                 attr_type=attr_defs[range_def["AttributeName"]],
             )
 
-        billing_mode = resp.get("BillingModeSummary", {}).get("BillingMode", "PROVISIONED")
-        throughput = resp.get("ProvisionedThroughput", {})
+        billing_mode = resp['Table'].get("BillingModeSummary", {}).get("BillingMode", "PROVISIONED")
+        throughput = resp['Table'].get("ProvisionedThroughput", {})
 
         # Tags need a separate call
         tags_resp = dynamodb.list_tags_of_resource(
-            ResourceArn=resp["TableArn"]
+            ResourceArn=resp['Table']["TableArn"]
         )
         tags = {t["Key"]: t["Value"] for t in tags_resp.get("Tags", [])}
 
         return DynamoTable(
-            table_name=table_name,
+            g_id=g_id,
+            table_name=read_id,
             region=region,
             partition_key=partition_key,
             sort_key=sort_key,
