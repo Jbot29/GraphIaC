@@ -11,6 +11,11 @@ from GraphIaC.aws.dynamodb import DynamoTable
 
 from GraphIaC.aws.lambda_func import LambdaZipFile
 
+from GraphIaC.aws.apigateway import ApiSite,ApiEndpoint
+
+#todo find a better way to do this
+
+
 BASE_MODEL_MAP = {
     "HostedZone": HostedZone,
     "Certificate": Certificate,
@@ -21,6 +26,19 @@ BASE_MODEL_MAP = {
     "SecurityGroup":SecurityGroup,
     "ALB": ALB,
     "Listener": Listener,
-    "DynamoTable": DynamoTable
+    "DynamoTable": DynamoTable,
+    "ApiSite": ApiSite,
+    "ApiEndpoint": ApiEndpoint,
     
 }
+
+"""
+def register_model(cls: Type[BaseModel]) -> Type[BaseModel]:
+    """Decorator to register a Pydantic model by its name."""
+    MODEL_REGISTRY[cls.__name__] = cls
+    return cls
+
+# Define a common base class for convenience
+@register_model
+
+"""

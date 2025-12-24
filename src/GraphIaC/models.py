@@ -17,6 +17,9 @@ class BaseNode(BaseModel):
     def read(self,session,G,g_id,read_id):
         pass
 
+    def create(self,session,G) -> bool:
+        pass
+    
     def update(self,session,G):
         pass
     def delete(self,session,G):
@@ -61,7 +64,7 @@ class BaseEdge(BaseModel):
     def read(self,session):
         pass
 
-    def create(self,session,G):
+    def create(self,session,G) -> bool:
         pass
 
     def update(self,session,G):

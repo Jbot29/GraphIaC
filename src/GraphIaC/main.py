@@ -169,7 +169,7 @@ def plan(state):
 
     #check for deleted items
     for orphaned_node in db_get_rows_not_in_list(state.db_conn, "nodes", db_nodes_seen):
-        logger.info("ORPHANDED Node:",orphaned_node)
+        logger.info(f"ORPHANDED Node: {orphaned_node}")
         on_last = load_model_from_db(state,orphaned_node[2],orphaned_node[3])
 
 

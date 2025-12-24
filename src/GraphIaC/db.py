@@ -16,6 +16,10 @@ model_from_dict = MyModel.parse_obj(model_dict)
 print("Model from JSON (using parse_obj):", model_from_dict)
 
 """
+from .logs import setup_logger
+
+logger = setup_logger()
+
 
 #Todo
 #turn tables into Pydantic models
@@ -155,8 +159,7 @@ def db_create_edge(conn,source_name, destination_name, edge,weight=1):
 
     source = get_node_by_id(conn,source_name)[0]
     destination = get_node_by_id(conn,destination_name)[0]
-    print("E")
-    print(source, destination, weight, edge_type,edge_data)
+
     cursor = conn.cursor()
     try:
         cursor.execute('''
@@ -165,7 +168,7 @@ def db_create_edge(conn,source_name, destination_name, edge,weight=1):
         ''', (source, destination, weight, edge_type,edge_data))
         
         conn.commit()
-        print("Edge added successfully.")
+        logger.debug("Edge added successfully.")
     
     except sqlite3.IntegrityError as e:
         print(f"Error: {e}")
