@@ -1,6 +1,8 @@
 
 import logging
+
 import colorlog
+
 
 def setup_logger(level=logging.INFO):
     logger = logging.getLogger("GraphIaC")
