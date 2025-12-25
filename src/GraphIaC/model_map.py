@@ -34,7 +34,6 @@ BASE_MODEL_MAP = {
 
 """
 def register_model(cls: Type[BaseModel]) -> Type[BaseModel]:
-    """Decorator to register a Pydantic model by its name."""
     MODEL_REGISTRY[cls.__name__] = cls
     return cls
 

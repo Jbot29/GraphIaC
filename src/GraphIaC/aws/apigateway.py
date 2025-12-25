@@ -112,10 +112,50 @@ class EndpointLambdaEdge(BaseEdge):
     def read(self,session,G):
         lambda_node = G.nodes[self.lambda_node_g_id]['data']
         endpoint = G.nodes[self.endpoint_node_g_id]['data']
+        site_node = None
+        site_node_id = None
+        for g_id, _, data in G.in_edges(self.endpoint_node_g_id, data=True):
+            if isinstance(data['data'], SiteEndpointEdge):
+                site_node = G.nodes[g_id]['data']
+
+        if not site_node:
+            return None
+        
+        r = get_route_lambda_attachment(
+            session,
+            site_node,
+            endpoint.method,
+            endpoint.path)
+
+        print(r)
+        if not r['attached']:
+            return None
+        
+        return self
+
+
+
 
     def create(self,session,G):
         lambda_node = G.nodes[self.lambda_node_g_id]['data']
         endpoint = G.nodes[self.endpoint_node_g_id]['data']
+        site_node = None
+        site_node_id = None
+        for g_id, _, data in G.in_edges(self.endpoint_node_g_id, data=True):
+            if isinstance(data['data'], SiteEndpointEdge):
+                site_node = G.nodes[g_id]['data']
+
+        if not site_node:
+            return None
+
+        print(f"L:{lambda_node}")
+        attach_route_to_lambda(
+            session,
+            site_node,
+            endpoint.method,
+            endpoint.path,
+            lambda_node.name)
+        
 
 
 def _find_api_by_name(client, name: str) -> Optional[dict]:
@@ -454,7 +494,7 @@ def _get_account_id(session: boto3.session.Session) -> str:
 
 def attach_route_to_lambda(
     session: boto3.session.Session,
-    site_name: str,
+    site: str,
     method: str,
     path: str,
     lambda_function_name: str,
@@ -467,13 +507,13 @@ def attach_route_to_lambda(
     apigw = session.client("apigatewayv2",region_name=site.region)
     lam = session.client("lambda",region_name=site.region)
 
-    api = _find_api_by_name(apigw, site_name)
+    api = _find_api_by_name(apigw, site.site_name)
     if not api:
-        raise ValueError(f"ApiSite {site_name!r} does not exist")
+        raise ValueError(f"ApiSite {site.site_name!r} does not exist")
 
     api_id = api["ApiId"]
-    rk = _route_key(method, path)
 
+    rk = _route_key_for_endpoint(path,method)
     route = _find_route_by_key(apigw, api_id, rk)
     if not route:
         raise ValueError(f"Route {rk!r} does not exist on site {site_name!r}. Create the endpoint/route first.")
@@ -510,7 +550,7 @@ def attach_route_to_lambda(
     account_id = _get_account_id(session)
 
     statement_id = f"apigw-{api_id}-{method.lower()}-{path.strip('/').replace('/', '-') or 'root'}"
-    source_arn = f"{_api_execution_arn(region, account_id, api_id)}/*/{method.upper()}{path if path.startswith('/') else '/' + path}"
+    source_arn = f"{_api_execution_arn(site.region, account_id, api_id)}/*/{method.upper()}{path if path.startswith('/') else '/' + path}"
 
     try:
         lam.add_permission(
@@ -537,7 +577,7 @@ def attach_route_to_lambda(
 
 def get_route_lambda_attachment(
     session: boto3.session.Session,
-    site_name: str,
+    site,
     method: str,
     path: str,
 ) -> Optional[dict]:
@@ -548,14 +588,16 @@ def get_route_lambda_attachment(
     - what integration does it point to?
     - what is that integration uri?
     """
-    apigw = _apigw(session)
 
-    api = _find_api_by_name(apigw, site_name)
+    apigw = session.client("apigatewayv2",region_name=site.region)
+    
+    api = _find_api_by_name(apigw, site.site_name)
     if not api:
         return None
 
     api_id = api["ApiId"]
-    rk = _route_key(method, path)
+    rk = _route_key_for_endpoint(path,method)
+
 
     route = _find_route_by_key(apigw, api_id, rk)
     if not route:
