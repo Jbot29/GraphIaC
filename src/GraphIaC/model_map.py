@@ -6,12 +6,10 @@ from GraphIaC.aws.iam_role import IAMRole
 from GraphIaC.aws.ec2_sg import SecurityGroup
 from GraphIaC.aws.ec2.alb import ALB
 from GraphIaC.aws.ec2.listener import Listener
-
 from GraphIaC.aws.dynamodb import DynamoTable
-
 from GraphIaC.aws.lambda_func import LambdaZipFile
-
 from GraphIaC.aws.apigateway import ApiSite,ApiEndpoint
+from GraphIaC.aws.ses import SESDomainIdentity,SESDomainRoute53Edge,LambdaSESEdge
 
 #todo find a better way to do this
 
@@ -23,13 +21,15 @@ BASE_MODEL_MAP = {
     "S3Bucket": S3Bucket,
     "IAMRole": IAMRole,
     "LambdaZipFile": LambdaZipFile,
-    "SecurityGroup":SecurityGroup,
+    "SecurityGroup": SecurityGroup,
     "ALB": ALB,
     "Listener": Listener,
     "DynamoTable": DynamoTable,
     "ApiSite": ApiSite,
     "ApiEndpoint": ApiEndpoint,
-    
+    "SESDomainIdentity": SESDomainIdentity,
+    "SESDomainRoute53Edge": SESDomainRoute53Edge,
+    "LambdaSESEdge": LambdaSESEdge,
 }
 
 """
