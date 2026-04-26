@@ -1,56 +1,44 @@
-import boto3
-
-from pydantic import BaseModel
-from typing import Optional,List
+from typing import Optional
 from botocore.exceptions import ClientError
 
+from GraphIaC.models import BaseNode
+from ..logs import setup_logger
+
+logger = setup_logger()
 
 
-
-import boto3
-from botocore.exceptions import ClientError
-
-class HostedZone(BaseModel):
-    g_id: str
-    zone_id: str
+class HostedZone(BaseNode):
     domain_name: str
+    zone_id: Optional[str] = None
 
-    def exists(self,session):
-        #print(f"{self.__class__.__name__}: Check {self}")
+    @property
+    def read_id(self) -> Optional[str]:
+        return self.domain_name
 
-        return check_hosted_zone_exists(session,self.domain_name)
-    
     @classmethod
-    def read(cls,session,g_id,domain_name):
+    def read(cls, session, G, g_id, read_id, **kwargs):
+        route53 = session.client("route53")
+        try:
+            resp = route53.list_hosted_zones()
+            for zone in resp["HostedZones"]:
+                if zone["Name"] == read_id.rstrip(".") + ".":
+                    return HostedZone(g_id=g_id, domain_name=read_id, zone_id=zone["Id"])
+        except ClientError as e:
+            logger.error(f"Error reading hosted zone {read_id}: {e}")
+        return None
 
-        exist,zone_id = check_hosted_zone_exists(session,domain_name)
+    def create(self, session, G):
+        raise NotImplementedError(
+            "HostedZone should be imported, not created. "
+            "Add it to the graph and let plan() detect it as IMPORT."
+        )
 
-        if not exist:
-            return False
-        
-        return HostedZone(g_id=g_id,zone_id=zone_id,domain_name=domain_name)
-    
+    def update(self, session, G):
+        pass
 
-
-def check_hosted_zone_exists(session,domain_name):
-    # Initialize the Route 53 client
-    route53 = session.client('route53')
-    
-    try:
-        # List all hosted zones and search for the domain name
-        response = route53.list_hosted_zones()
-        
-        # Check each hosted zone's name against the provided domain name
-        for zone in response['HostedZones']:
-            # Hosted zone names in Route 53 end with a dot, so we add it to match
-            if zone['Name'] == domain_name.rstrip('.') + '.':
-                print(f"Hosted zone found: {zone['Id']}")
-                return True, zone['Id']
-                
-        print("Hosted zone not found.")
-        return False, None
-
-    except ClientError as e:
-        print(f"An error occurred: {e}")
-        return False, None
-
+    def delete(self, session, G):
+        route53 = session.client("route53")
+        try:
+            route53.delete_hosted_zone(Id=self.zone_id)
+        except ClientError as e:
+            raise
