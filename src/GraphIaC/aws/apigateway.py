@@ -24,12 +24,13 @@ from ..logs import setup_logger
 logger = setup_logger()
 
 class ApiSite(BaseNode):
-    site_name: str 
+    site_name: str
     protocol: Literal["HTTP"] = "HTTP"
     stage: str = "$default"
     base_path: str = "/"    # for future nesting, versioning, etc.
     region: str = "us-east-2"
-    
+    cors_origins: List[str] = []
+
     @property
     def read_id(self) -> Optional[str]:
 
@@ -43,6 +44,10 @@ class ApiSite(BaseNode):
 
     def create(self,session,G):
         resp = create_api_site(session, self)
+        return True
+
+    def update(self,session,G):
+        update_api_site(session, self)
         return True
         
     
@@ -201,12 +206,21 @@ def create_api_site(session: boto3.session.Session, site: ApiSite) -> dict:
 
     client = session.client("apigatewayv2",region_name=site.region)
 
-    resp = client.create_api(
+    kwargs = dict(
         Name=site.site_name,
         ProtocolType=site.protocol,
-        # this is the usual route selection expression for HTTP APIs
         RouteSelectionExpression="$request.method $request.path",
     )
+
+    if site.cors_origins:
+        kwargs["CorsConfiguration"] = {
+            "AllowOrigins": site.cors_origins,
+            "AllowMethods": ["POST", "OPTIONS"],
+            "AllowHeaders": ["Content-Type"],
+            "MaxAge": 300,
+        }
+
+    resp = client.create_api(**kwargs)
 
     api_id = resp["ApiId"]
     _ensure_stage(client, api_id, site.stage)
@@ -245,25 +259,27 @@ def get_api_site(session: boto3.session.Session,g_id, name: str,region) -> Optio
 
 def update_api_site(session: boto3.session.Session, site: ApiSite) -> dict:
     """
-    Update basic properties of an existing ApiSite.
-    Right now we only touch Name and ensure the stage exists.
+    Update basic properties of an existing ApiSite, including CORS config.
     """
-    client = session.client("apigatewayv2",region_name=site.region)    
+    client = session.client("apigatewayv2",region_name=site.region)
 
-    api = _find_api_by_name(client, site.name)
+    api = _find_api_by_name(client, site.site_name)
     if not api:
-        raise ValueError(f"ApiSite {site.name!r} does not exist")
+        raise ValueError(f"ApiSite {site.site_name!r} does not exist")
 
     api_id = api["ApiId"]
 
-    # For now, just make sure name & protocol are correct.
-    # (HTTP API currently only supports HTTP, so protocol is mostly fixed.)
-    resp = client.update_api(
-        ApiId=api_id,
-        Name=site.name,
-        # ProtocolType can't be changed once created; we don't send it here.
-        # You can add CorsConfiguration, Description, etc. later.
-    )
+    kwargs = dict(ApiId=api_id, Name=site.site_name)
+
+    if site.cors_origins:
+        kwargs["CorsConfiguration"] = {
+            "AllowOrigins": site.cors_origins,
+            "AllowMethods": ["POST", "OPTIONS"],
+            "AllowHeaders": ["Content-Type"],
+            "MaxAge": 300,
+        }
+
+    resp = client.update_api(**kwargs)
 
     _ensure_stage(client, api_id, site.stage)
 

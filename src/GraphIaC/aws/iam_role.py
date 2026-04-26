@@ -254,5 +254,15 @@ def delete_iam_role(session,role_name: str):
 
     print("Done.")
 
-# Usage:
 
+
+
+
+
+def attach_role_policy(session,role_name: str,policy_arn) -> None:
+    iam = session.client("iam")
+    
+    iam.attach_role_policy(
+        RoleName=role_name,
+        PolicyArn=policy_arn,
+    )

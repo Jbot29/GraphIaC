@@ -13,13 +13,17 @@ src/GraphIaC.egg-info/SOURCES.txt
 src/GraphIaC.egg-info/dependency_links.txt
 src/GraphIaC.egg-info/requires.txt
 src/GraphIaC.egg-info/top_level.txt
+src/GraphIaC/aws/apigateway.py
 src/GraphIaC/aws/certificate.py
 src/GraphIaC/aws/cloudfront.py
+src/GraphIaC/aws/cloudwatch.py
 src/GraphIaC/aws/dynamodb.py
 src/GraphIaC/aws/ec2_alb.py
 src/GraphIaC/aws/ec2_sg.py
 src/GraphIaC/aws/gbase.py
+src/GraphIaC/aws/iam_policy.py
 src/GraphIaC/aws/iam_role.py
+src/GraphIaC/aws/lambda_dynamodb.py
 src/GraphIaC/aws/lambda_func.py
 src/GraphIaC/aws/old-ec2.py
 src/GraphIaC/aws/route53.py
@@ -41,4 +45,5 @@ src/GraphIac/aws/lambda_func.py
 src/GraphIac/aws/route53.py
 src/GraphIac/aws/s3.py
 src/GraphIac/aws/types.py
+tests/test_graph.py
 tests/test_pydantic.py

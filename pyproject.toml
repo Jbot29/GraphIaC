@@ -38,6 +38,7 @@ select = [
   "E",   # pycodestyle errors
   "F",   # pyflakes
   "I",   # isort (import sorting)
+  "T201",  # disallow print()
 ]
 
 # Ignore rules that tend to create noise early in a legacy repo.

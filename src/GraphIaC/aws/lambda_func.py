@@ -7,8 +7,8 @@ from typing import Optional,List
 from ..models import BaseNode
 
 from .types import AwsName
-from .iam_role import IAMRolePolicyEdge
-from .iam_policy import IamTrustPolicyStatement,get_trust_policy_for_role
+from .iam_role import IAMRolePolicyEdge,attach_role_policy
+from .iam_policy import IamTrustPolicyStatement
 # TODO: Zipfile compare sha
 
 assume_role_policy_document = {
@@ -32,19 +32,23 @@ stmt = IamTrustPolicyStatement(
 )
 
 
-#upsert_trust_statement_for_role(session, role_name="MyLambdaRole", statement=stmt)
+
 
 class IAMRolePolicyLambdaEdge(IAMRolePolicyEdge):
-    policy_arn: str = "arn:aws:iam::aws:policy/AWSLambdaBasicExecutionRole"
 
+    policy_arn: str = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
     def read(self,session,G):
+        print("READ EDGE POLICY")
         role_name = G.nodes[self.role_g_id]['data'].read_id
-        r = get_trust_policy_for_role(session,role_name)
+        
 
 
     def create(self,session,G):
+        role_name = G.nodes[self.role_g_id]['data'].read_id
+        attach_role_policy(session,role_name,self.policy_arn)
         #add the trust relationship
-        pass
+        
+        return True
 
     def update(self,session,G):
         pass

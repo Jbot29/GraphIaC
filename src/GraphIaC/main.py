@@ -144,29 +144,9 @@ def plan(state):
             
             plan_ops.append(create_op)
         else:
+            # todo finish with diff
             edge_data.read(state.session,state.G)
         
-            
-        """
-        for e in state.G.neighbors(node):
-            
-            print(f"\tEdge: {e}")
-            edge = state.G.edges[node,e]
-            edge_data = state.G.edges[node,e]['data']
-            #get edge_id
-            edge_node_db_row = get_node_by_id(state.db_conn,e)
-            #print(f"\t{edge}")
-            print("EN:",edge_node_db_row)
-            if edge_node_db_row:
-                edge_db_row = get_edge_by_id(state.db_conn,pn_db_row[0],edge_node_db_row[0])
-                print(edge_db_row)
-            else: # need to create
-                print("CREATE EDGE:",edge_data)
-                create_op = Operation(operation=OperationType.CREATE_EDGE,obj=pn)
-                plan_ops.append(create_op)
-           """     
-            
-
     #check for deleted items
     for orphaned_node in db_get_rows_not_in_list(state.db_conn, "nodes", db_nodes_seen):
         logger.info(f"ORPHANDED Node: {orphaned_node}")
