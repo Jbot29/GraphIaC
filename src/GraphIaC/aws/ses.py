@@ -4,6 +4,7 @@ from botocore.exceptions import ClientError
 from GraphIaC.models import BaseNode, BaseEdge
 from .iam_role import IAMRoleInlinePolicyEdge
 from .iam_policy import IamPolicyDocument, IamPolicyStatement, get_inline_policy_for_role, put_inline_policy_for_role
+from .route53 import HostedZone
 from ..logs import setup_logger
 
 logger = setup_logger()
@@ -44,7 +45,7 @@ class SESDomainIdentity(BaseNode):
             dkim_tokens=dkim_tokens,
             verification_status=resp.get("VerificationStatus"),
         )
-
+ 
     def create(self, session, G):
         ses = session.client("sesv2", region_name=self.region)
         resp = ses.create_email_identity(
@@ -112,6 +113,13 @@ class SESDomainRoute53Edge(BaseEdge):
         if not ses_node.dkim_tokens:
             raise ValueError(f"SESDomainIdentity {self.ses_g_id} has no DKIM tokens — was it created?")
 
+        zone_id = zone_node.zone_id
+        if not zone_id:
+            fresh = HostedZone.read(session, G, zone_node.g_id, zone_node.read_id)
+            if not fresh or not fresh.zone_id:
+                raise ValueError(f"Could not find hosted zone for {zone_node.domain_name}")
+            zone_id = fresh.zone_id
+
         route53 = session.client("route53")
         changes = [
             {
@@ -127,7 +135,7 @@ class SESDomainRoute53Edge(BaseEdge):
         ]
 
         route53.change_resource_record_sets(
-            HostedZoneId=zone_node.zone_id,
+            HostedZoneId=zone_id,
             ChangeBatch={"Changes": changes},
         )
         logger.info(f"Created {len(changes)} DKIM CNAME records for {ses_node.domain}")
