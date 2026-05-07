@@ -58,6 +58,46 @@ GraphIaC.plan(state)
 GraphIaC.run(state)
 ```
 
+## CLI
+
+GraphIaC ships a command-line interface so you can run infra operations without writing a script.
+
+```
+python -m GraphIaC <aws-profile> --infra_file <path/to/infra.py> <command>
+```
+
+**Commands**
+
+| Command | What it does |
+|---------|--------------|
+| `plan` | Diffs live AWS state against the local DB and prints the changes that would be applied |
+| `run` | Applies the plan — creates, updates, and deletes resources |
+| `diagram` | Renders the infrastructure graph as a Graphviz PNG |
+| `import` | Imports existing AWS resources into local state |
+
+**Examples**
+
+```bash
+# Preview changes for a profile named fndtn_web_deploy
+python -m GraphIaC fndtn_web_deploy --infra_file infra.py plan
+
+# Apply changes
+python -m GraphIaC fndtn_web_deploy --infra_file infra.py run
+
+# Render a diagram
+python -m GraphIaC fndtn_web_deploy --infra_file infra.py diagram
+```
+
+The SQLite state DB is created automatically next to the infra file (e.g. `infra.py` → `infra.db`). Your infra file must expose an `infra(state)` function that builds the graph:
+
+```python
+# infra.py
+def infra(state):
+    table = DynamoTable(g_id="users_table", ...)
+    GraphIaC.add_node(state, table)
+    # add more nodes and edges...
+```
+
 ## Running Tests
 
 Tests mirror the source tree (`tests/aws/` covers `src/GraphIaC/aws/`, and so on for future providers).
