@@ -186,7 +186,7 @@ def run(state):
             result = change.obj.delete(state.session,state.G)
             print(result)
             row_id = get_node_by_id(state.db_conn,change.obj.g_id)
-            db_delete_row(state.db_conn,"nodes",row_id)
+            db_delete_row(state.db_conn,"nodes",row_id[0])
         elif change.operation == OperationType.CREATE_EDGE:
             print(f"Create EDGE: {change.obj}")
             result = change.obj.create(state.session,state.G)

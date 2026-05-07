@@ -1,76 +1,78 @@
 # GraphIaC
 
-## Motivation
+A graph-based Infrastructure-as-Code framework for AWS. Model your cloud infrastructure as a directed graph — **nodes are AWS resources, edges are the connections and permissions between them**.
 
-Infrastructure as code has been a great step forward for building and managing cloud infrastructure. 
+## The Problem
 
-That beind said, the current tools leave much to be desired. While these tools have provided a way to describe infrastructure
-in code, they have failed to make it easy to advance the ease of creating infrastructure past that.
+Tools like Terraform and Pulumi make it easy to define individual resources. The hard part is wiring them together: IAM policies, invoke permissions, service integrations. That boilerplate is repetitive, error-prone, and the main source of permission debugging in real projects. Most IaC tools treat it as an afterthought, burying it inside resource definitions in ways that make the code hard to read and impossible to reuse.
 
-The real pain is the connections or edges between things. I need compute that can has permissions and can talk to a db. These are hard to define and manage.
+## The Approach
 
-It feels like many of the tools bolt these steps on yet I think it is the most important part. AWS is great but most of my time in it is not spent setting up service but debugging permission errors
-while trying to access them.
+GraphIaC promotes connections to first-class citizens. When you add a `LambdaToDynamoEdge`, the edge already knows what IAM policies are required. It queries the graph for the relevant ARNs and provisions everything itself. You declare the connection; the edge handles the boilerplate.
 
-The goal for GraphIOC is to promote these edge configurations to first class citzens.
+Because AWS permission patterns are stable, that knowledge gets written once into the edge class and reused everywhere. Nodes stay clean and self-contained, which means they're also easy to copy across projects.
 
-A second goal is reusiability. It is a pain setting things up, and you often want to copy and paste basically. Because other systems don't handle the edge configuration well, you can't just copy/paste
-and rename. They often have policies and other things all mixed up in the definition that is not easy to tease apart.
+A secondary benefit: because the infrastructure is a graph, you can render it as a diagram at any time — always up to date, no manual documentation required.
 
-Another minor goal is sense we have everything defined as code, why can't the system be somewhat self documenting? Why can't I just see a diagram or generated docs of the the infrastructure?
-IOC is good, solved checking in things, envs like stage/prod good.
+## Key Concepts
 
-But it really hasn't it mdae it much easier to create infrastructure.
+- **Nodes** — AWS resources (Lambda, DynamoDB table, IAM role, API Gateway, etc.), each a Pydantic model with `read`, `create`, `update`, and `delete` methods
+- **Edges** — the connections between resources; each edge knows what it takes to wire two nodes together (IAM policies, invoke permissions, etc.)
+- **State reconciliation** — on every `plan()`, GraphIaC diffs live AWS state against a local SQLite DB and produces a list of `CREATE`, `UPDATE`, `DELETE`, or `IMPORT` operations
+- **`run()`** — executes the plan in the correct order
 
-It is the ORM of infrastructure, easy to do simple things hard to do hard things.
+## Install
 
-It is easy in to create a db or a S# bucket, it is a hard to glue all the things together. What depends on what and what are the permissions.
+```bash
+pip install -e ".[dev]"
+```
 
-Most of my time building infra strcuture is either figure out what needs to be created in what order or why something doesn't have permissions for something.
+GraphIaC can export infrastructure diagrams via Graphviz. To enable that, install `pygraphviz`:
 
-In Graph terms is it easy to define the nodes but difficult to define the edges. The infrastrucutre is useless without the edges.
-
-Trying to make connections to things seem likes an after thought in the current systems
-
-Because of this it is very difficult to reuse IOC code. The node is a monolith with every attached to it so you can't just copy and paste because it is attached to everything else.
-
-The other things is these tools tend to eat everything. They are the worst types of frameworks as when the break or behave in ways you don't like there is little to be done in the way to workaround them.
-
-IOC tools don't actually give you any knowledge on the platform. Framework problem.
-
-Graphing. Why cant we have up to date graphs and documentation?
-
-
-First class citzens
-
-Edges
-Import
-Customization
-Full control over behavior
-Light weight framewrok
-
-The knownledge lives in the nodes and edges instead of the framework.
-
-
-Also by having the infra defined as a graph allows secondary analysis of the system. It also allows for easy generation of up to date graphs.
-
-
-
-
+```bash
 pip install --config-settings="--global-option=build_ext" \
             --config-settings="--global-option=-I$(brew --prefix graphviz)/include/" \
             --config-settings="--global-option=-L$(brew --prefix graphviz)/lib/" \
             pygraphviz
-			
-			
-			
-Import -> Pydantic model (chat-gpt?)
+```
 
+## Usage
 
+```python
+import sqlite3
+import boto3
+import GraphIaC
+from GraphIaC.aws.dynamodb import DynamoTable, DynamoKey
+from GraphIaC.aws.lambda_func import LambdaFunction
 
-python -m GraphIOC --version
+session = boto3.Session(profile_name="my-profile")
+db_conn = sqlite3.connect("my-infra.db")
 
+state = GraphIaC.init(session, db_conn)
 
-doesn't do ordering and waiting well
+table = DynamoTable(g_id="users_table", table_name="users", partition_key=DynamoKey(name="pk", attr_type="S"))
+GraphIaC.add_node(state, table)
 
-the perpetual gulf between the app developrs and devops. 
+# plan() shows what will change; run() applies it
+GraphIaC.plan(state)
+GraphIaC.run(state)
+```
+
+## Running Tests
+
+Tests mirror the source tree (`tests/aws/` covers `src/GraphIaC/aws/`, and so on for future providers).
+
+**AWS integration tests** hit real AWS and require credentials. Set `AWS_PROFILE` to the profile you want to use, then run:
+
+```bash
+AWS_PROFILE=your-profile pytest tests/aws/
+```
+
+Tests generate randomized resource names on every run and clean up after themselves, including on failure. Resources are created in `us-east-2` by default.
+
+**Run a specific test file:**
+```bash
+AWS_PROFILE=your-profile pytest tests/aws/test_dynamodb.py -v
+```
+
+**Skip AWS tests** (e.g. in CI without credentials) — omit `AWS_PROFILE` or unset it. Any test that needs AWS will be skipped automatically.

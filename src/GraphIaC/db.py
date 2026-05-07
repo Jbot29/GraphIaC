@@ -201,8 +201,10 @@ def db_get_rows_not_in_list(conn, table_name, id_list):
 
     cursor = conn.cursor()
 
-    
-    query = f"SELECT * FROM {table_name} WHERE id NOT IN ({",".join(id_list)})"
+    if not id_list:
+        query = f"SELECT * FROM {table_name}"
+    else:
+        query = f"SELECT * FROM {table_name} WHERE id NOT IN ({','.join(id_list)})"
 
     print(query)
     try:
@@ -244,7 +246,7 @@ def db_delete_row(db_conn, table_name, row_id):
         cursor.execute(sql_query, (row_id,))
         
         # Commit the transaction
-        conn.commit()
+        db_conn.commit()
 
         print(f"Row with ID {row_id} deleted successfully from '{table_name}' table.")
 
