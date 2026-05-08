@@ -46,11 +46,11 @@ def import_run(profile,db_path,user_infra_module):
     user_infra_module.infra_import(session,imports)
     print(imports)
 
-    GraphIOC.run_import(session,db_path,imports)
+    GraphIaC.run_import(session,db_path,imports)
     return
 
 def plan(profile,db_conn,user_infra_module):
-    logger.info(f"GraphIOC: Plan")
+    logger.info("GraphIOC: Plan")
 
     session = boto3.session.Session(profile_name=profile)
 
@@ -60,7 +60,7 @@ def plan(profile,db_conn,user_infra_module):
 
     changes = GraphIaC.plan(gioc)
 
-    logger.info(f"Changes:")
+    logger.info("Changes:")
     for change in changes:
         logger.info(f"\tChange: {change.operation} {change.obj}")
 

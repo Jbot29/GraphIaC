@@ -1,6 +1,6 @@
 from typing import Any, List, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class IamPolicyStatement(BaseModel):
@@ -148,10 +148,6 @@ def delete_statement_for_role(
     put_inline_policy_for_role(session, role_name, policy_name, policy_doc)
     return policy_doc
 
-
-from typing import Any, List, Literal
-
-from pydantic import BaseModel, Field
 
 # ---------- TRUST POLICY MODELS ---------- #
 

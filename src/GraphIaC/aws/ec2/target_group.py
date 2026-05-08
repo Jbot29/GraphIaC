@@ -37,7 +37,8 @@ class TargetGroup(BaseNode):
         #return tg
 
 
-def create_target_group(tg):
+def create_target_group(session, tg, region="us-east-1"):
+    elb = session.client('elbv2', region_name=region)
     # Step 3: Create a Target Group
     response = elb.create_target_group(
         Name=tg.id,

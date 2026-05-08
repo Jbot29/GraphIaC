@@ -7,9 +7,6 @@ from pydantic import BaseModel
 class BaseNode(BaseModel):
     g_id: str    
 
-    def create(self,session,G):
-        pass
-
     @property
     def read_id(self) -> Optional[str]:
         return None

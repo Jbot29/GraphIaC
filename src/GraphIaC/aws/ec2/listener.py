@@ -16,7 +16,7 @@ class Listener(BaseNode):
     @classmethod
     def read(self,session,G,g_id,read_id):
         print(session)
-        l =  read_listener(session,g_id, read_id)
+        read_listener(session, g_id, read_id)
 
         return Listener(
             g_id=g_id,
@@ -25,16 +25,17 @@ class Listener(BaseNode):
         
 
         
-def create_listener(l):
+def create_listener(session, listener, region="us-east-1"):
+    elb = session.client('elbv2', region_name=region)
     # Step 4: Create a Listener for the Load Balancer
     response = elb.create_listener(
-        LoadBalancerArn=l.lb_arn,
+        LoadBalancerArn=listener.lb_arn,
         Protocol='HTTP',
         Port=80,
         DefaultActions=[
             {
                 'Type': 'forward',
-                'TargetGroupArn': l.tg_arn
+                'TargetGroupArn': listener.tg_arn
             }
         ]
     )
@@ -67,24 +68,7 @@ def read_listener(session,g_id, listener_arn,region_name = "us-east-1"):
         # This is theoretically unusual since an ARN should be unique
         raise RuntimeError(f"Multiple listeners returned for ARN '{listener_arn}'.")
 
-    return  listeners[0]
-    # We have exactly one listener
-    l = listeners[0]
-
-    # Build a 'desc' from protocol and port for convenience
-    protocol = l.get("Protocol", "UNKNOWN")
-    port = l.get("Port", -1)
-    desc_str = f"{protocol}:{port}"
-
-    # Extract the default action target group ARN if there's a forward action
-    tg_arn = None
-    default_actions = l.get("DefaultActions", [])
-    if default_actions:
-        # Typically there's at least one action
-        # If the action type is 'forward', we can retrieve 'TargetGroupArn'
-        if default_actions[0]["Type"] == "forward":
-            tg_arn = default_actions[0].get("TargetGroupArn")
-
+    return listeners[0]
 
 
 

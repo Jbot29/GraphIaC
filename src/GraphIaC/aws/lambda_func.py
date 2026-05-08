@@ -39,7 +39,6 @@ class IAMRolePolicyLambdaEdge(IAMRolePolicyEdge):
     policy_arn: str = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
     def read(self,session,G):
         print("READ EDGE POLICY")
-        role_name = G.nodes[self.role_g_id]['data'].read_id
         
 
 
@@ -134,7 +133,7 @@ def lambda_exists(session, function_name,region):
     lambda_client = session.client('lambda',region_name=region)
     try:
         # Attempt to retrieve the Lambda function configuration
-        response = lambda_client.get_function(FunctionName=function_name)
+        lambda_client.get_function(FunctionName=function_name)
         return True  # Function exists
     except ClientError as e:
         # Check for the 'ResourceNotFoundException'
@@ -153,7 +152,7 @@ def lambda_create(session,function_name,runtime,role_arn,handler,description,tim
 
     print(len(zip_bytes))
     print(f"Creating Lambda function '{function_name}'...")
-    create_fn_response = lambda_client.create_function(
+    lambda_client.create_function(
             FunctionName=function_name,
         Runtime=runtime,
         Role=role_arn,  # The ARN of the IAM role

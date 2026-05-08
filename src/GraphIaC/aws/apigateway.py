@@ -29,7 +29,7 @@ class ApiSite(BaseNode):
 
 
     def create(self,session,G):
-        resp = create_api_site(session, self)
+        create_api_site(session, self)
         return True
 
     def update(self,session,G):
@@ -101,10 +101,8 @@ class EndpointLambdaEdge(BaseEdge):
         return self.lambda_node_g_id
 
     def read(self,session,G):
-        lambda_node = G.nodes[self.lambda_node_g_id]['data']
         endpoint = G.nodes[self.endpoint_node_g_id]['data']
         site_node = None
-        site_node_id = None
         for g_id, _, data in G.in_edges(self.endpoint_node_g_id, data=True):
             if isinstance(data['data'], SiteEndpointEdge):
                 site_node = G.nodes[g_id]['data']
@@ -131,7 +129,6 @@ class EndpointLambdaEdge(BaseEdge):
         lambda_node = G.nodes[self.lambda_node_g_id]['data']
         endpoint = G.nodes[self.endpoint_node_g_id]['data']
         site_node = None
-        site_node_id = None
         for g_id, _, data in G.in_edges(self.endpoint_node_g_id, data=True):
             if isinstance(data['data'], SiteEndpointEdge):
                 site_node = G.nodes[g_id]['data']
@@ -272,13 +269,13 @@ def update_api_site(session: boto3.session.Session, site: ApiSite) -> dict:
     return resp
 
 
-def delete_api_site(session: boto3.session.Session, name: str) -> bool:
+def delete_api_site(session: boto3.session.Session, name: str, region: str = "us-east-2") -> bool:
     """
     Delete an ApiSite (HTTP API) by name.
 
     Returns True if deleted, False if it didn't exist.
     """
-    client = session.client("apigatewayv2",region_name=site.region)    
+    client = session.client("apigatewayv2", region_name=region)
 
 
     api = _find_api_by_name(client, name)
@@ -295,9 +292,9 @@ def upsert_api_site(session: boto3.session.Session, site: ApiSite) -> dict:
 
     Returns the underlying create_api / update_api response.
     """
-    client = _apigw(session)
+    client = session.client("apigatewayv2", region_name=site.region)
 
-    existing = _find_api_by_name(client, site.name)
+    existing = _find_api_by_name(client, site.site_name)
     if not existing:
         return create_api_site(session, site)
 
@@ -349,7 +346,7 @@ def attach_endpoint_to_site(
 
     api = _find_api_by_name(client, site.site_name)
     if not api:
-        raise ValueError(f"ApiSite {site_name!r} does not exist")
+        raise ValueError(f"ApiSite {site.site_name!r} does not exist")
 
     api_id = api["ApiId"]
     route_key = _route_key_for_endpoint(endpoint.path,endpoint.method)
@@ -373,6 +370,7 @@ def detach_endpoint_from_site(
     session: boto3.session.Session,
     site_name: str,
     endpoint: ApiEndpoint,
+    region: str = "us-east-2",
 ) -> bool:
     """
     Remove the route that corresponds to this endpoint from the given site.
@@ -380,15 +378,15 @@ def detach_endpoint_from_site(
     Returns True if deleted, False if it didn't exist.
     """
 
-    client = session.client("apigatewayv2",region_name=site.region)
-    
+    client = session.client("apigatewayv2", region_name=region)
+
     api = _find_api_by_name(client, site_name)
     if not api:
         # nothing to do – site itself doesn't exist
         return False
 
     api_id = api["ApiId"]
-    route_key = _route_key_for_endpoint(endpoint)
+    route_key = _route_key_for_endpoint(endpoint.path, endpoint.method)
 
     existing = _find_route_by_key(client, api_id, route_key)
     if not existing:
@@ -452,8 +450,9 @@ def get_endpoint_from_site(
     site_name: str,
     method: str,
     path: str,
+    region: str = "us-east-2",
 ) -> Optional[ApiEndpoint]:
-    client = _apigw(session)
+    client = session.client("apigatewayv2", region_name=region)
 
     api = _find_api_by_name(client, site_name)
     if not api:
@@ -518,7 +517,7 @@ def attach_route_to_lambda(
     rk = _route_key_for_endpoint(path,method)
     route = _find_route_by_key(apigw, api_id, rk)
     if not route:
-        raise ValueError(f"Route {rk!r} does not exist on site {site_name!r}. Create the endpoint/route first.")
+        raise ValueError(f"Route {rk!r} does not exist on site {site.site_name!r}. Create the endpoint/route first.")
 
     # Resolve Lambda ARN
     fn = lam.get_function(FunctionName=lambda_function_name)
@@ -548,7 +547,6 @@ def attach_route_to_lambda(
 
     # 3) Add Lambda permission for API Gateway invocation (idempotent-ish)
     # Use a stable StatementId so repeated applies are safe.
-    region = session.region_name or boto3.session.Session().region_name
     account_id = _get_account_id(session)
 
     statement_id = f"apigw-{api_id}-{method.lower()}-{path.strip('/').replace('/', '-') or 'root'}"
@@ -648,6 +646,7 @@ def detach_route_from_lambda(
     method: str,
     path: str,
     *,
+    region: str = "us-east-2",
     delete_integration: bool = False,
     remove_lambda_permission: bool = False,
     lambda_function_name_for_permission: Optional[str] = None,
@@ -660,14 +659,14 @@ def detach_route_from_lambda(
     - remove the lambda permission statement (requires function name)
     """
 
-    apigw = session.client("apigatewayv2",region_name=site.region)
+    apigw = session.client("apigatewayv2", region_name=region)
 
     api = _find_api_by_name(apigw, site_name)
     if not api:
         return False
 
     api_id = api["ApiId"]
-    rk = _route_key(method, path)
+    rk = _route_key_for_endpoint(path, method)
 
     route = _find_route_by_key(apigw, api_id, rk)
     if not route:
@@ -693,7 +692,7 @@ def detach_route_from_lambda(
         if not lambda_function_name_for_permission:
             raise ValueError("lambda_function_name_for_permission is required when remove_lambda_permission=True")
 
-        lam = _lambda(session)
+        lam = session.client("lambda", region_name=region)
         statement_id = f"apigw-{api_id}-{method.lower()}-{path.strip('/').replace('/', '-') or 'root'}"
         try:
             lam.remove_permission(FunctionName=lambda_function_name_for_permission, StatementId=statement_id)

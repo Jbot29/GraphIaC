@@ -40,9 +40,6 @@ class GraphIaCState(BaseModel):
 def init(session,db_conn):
     create_tables(db_conn)
 
-    cursor = db_conn.execute("PRAGMA database_list;")
-    rows = cursor.fetchall()
-
     return GraphIaCState(session=session,db_conn=db_conn,G=nx.DiGraph(),models_map=BASE_MODEL_MAP)
 
 
@@ -80,8 +77,6 @@ def plan(state):
 
     plan_ops = []
     db_nodes_seen = []
-    db_edges_seen = []
-    
     for node in state.G.nodes:
         pn = state.G.nodes[node]['data']
 
@@ -211,7 +206,7 @@ def export_graph(state,file_name):
     A.draw(f"{file_name}.png", prog="neato")    
 
 
-def walk_graph(G):
+def walk_graph(session, G):
     for node in G.nodes:
         print(f"Node: {node}")
 

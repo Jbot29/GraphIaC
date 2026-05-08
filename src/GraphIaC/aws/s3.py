@@ -96,8 +96,6 @@ def set_private_s3_bucket(bucket_name, region=None):
         print(f"Error: {e}")
         return None
 
-import boto3
-
 
 def delete_s3_bucket(session,bucket_name, region=None):
     """
