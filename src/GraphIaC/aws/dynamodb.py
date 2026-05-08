@@ -1,4 +1,3 @@
-
 from typing import Dict, Literal, Optional
 
 from botocore.exceptions import ClientError
@@ -20,7 +19,6 @@ class DynamoKey(BaseModel):
     attr_type: AttrType = Field("S", description="DynamoDB attribute type: S, N, or B")
 
 
-
 class DynamoTable(BaseNode):
     table_name: str = Field(..., alias="table_name")
     region: str = "us-east-2"
@@ -28,12 +26,8 @@ class DynamoTable(BaseNode):
     sort_key: Optional[DynamoKey] = None
 
     billing_mode: BillingMode = "PAY_PER_REQUEST"
-    read_capacity: Optional[int] = Field(
-        0, description="Only used when billing_mode=PROVISIONED"
-    )
-    write_capacity: Optional[int] = Field(
-        0, description="Only used when billing_mode=PROVISIONED"
-    )
+    read_capacity: Optional[int] = Field(0, description="Only used when billing_mode=PROVISIONED")
+    write_capacity: Optional[int] = Field(0, description="Only used when billing_mode=PROVISIONED")
 
     tags: Dict[str, str] = Field(default_factory=dict)
 
@@ -41,26 +35,27 @@ class DynamoTable(BaseNode):
     def read_id(self) -> Optional[str]:
         return self.table_name
 
-    def read_arn(self,session):
-        dynamodb = session.client("dynamodb",region_name=self.region)
+    def read_arn(self, session):
+        dynamodb = session.client("dynamodb", region_name=self.region)
 
         resp = dynamodb.describe_table(TableName=self.table_name)
         return resp["Table"]["TableArn"]
 
     @classmethod
-    def read(self,session,G,g_id,read_id,region="us-east-2"):
-        
+    def read(self, session, G, g_id, read_id, region="us-east-2"):
         logger.info(f"{self.__class__.__name__}: Exists {self}")
-        dynamodb = session.client("dynamodb",region_name=region)
-    
+        dynamodb = session.client("dynamodb", region_name=region)
+
         try:
             resp = dynamodb.describe_table(TableName=read_id)
         except dynamodb.exceptions.ResourceNotFoundException:
             return None
 
         # Extract keys
-        key_schema = resp['Table']["KeySchema"]
-        attr_defs = {a["AttributeName"]: a["AttributeType"] for a in resp['Table']["AttributeDefinitions"]}
+        key_schema = resp["Table"]["KeySchema"]
+        attr_defs = {
+            a["AttributeName"]: a["AttributeType"] for a in resp["Table"]["AttributeDefinitions"]
+        }
 
         hash_def = next(k for k in key_schema if k["KeyType"] == "HASH")
         range_def = next((k for k in key_schema if k["KeyType"] == "RANGE"), None)
@@ -77,13 +72,11 @@ class DynamoTable(BaseNode):
                 attr_type=attr_defs[range_def["AttributeName"]],
             )
 
-        billing_mode = resp['Table'].get("BillingModeSummary", {}).get("BillingMode", "PROVISIONED")
-        throughput = resp['Table'].get("ProvisionedThroughput", {})
+        billing_mode = resp["Table"].get("BillingModeSummary", {}).get("BillingMode", "PROVISIONED")
+        throughput = resp["Table"].get("ProvisionedThroughput", {})
 
         # Tags need a separate call
-        tags_resp = dynamodb.list_tags_of_resource(
-            ResourceArn=resp['Table']["TableArn"]
-        )
+        tags_resp = dynamodb.list_tags_of_resource(ResourceArn=resp["Table"]["TableArn"])
         tags = {t["Key"]: t["Value"] for t in tags_resp.get("Tags", [])}
 
         return DynamoTable(
@@ -97,8 +90,6 @@ class DynamoTable(BaseNode):
             write_capacity=throughput.get("WriteCapacityUnits"),
             tags=tags,
         )
-
-
 
     def _to_attribute_definitions(self):
         attrs = [
@@ -137,9 +128,9 @@ class DynamoTable(BaseNode):
             return None
         return [{"Key": k, "Value": v} for k, v in self.tags.items()]
 
-    def create(self,session,G):
+    def create(self, session, G):
         dynamodb = session.client("dynamodb", region_name=self.region)
-        
+
         params: Dict = {
             "TableName": self.table_name,
             "AttributeDefinitions": self._to_attribute_definitions(),
@@ -166,8 +157,7 @@ class DynamoTable(BaseNode):
             raise
 
     def delete(self, session, G):
-
-        dynamodb = session.client("dynamodb", region_name=self.region)        
+        dynamodb = session.client("dynamodb", region_name=self.region)
 
         try:
             resp = dynamodb.delete_table(TableName=self.table_name)

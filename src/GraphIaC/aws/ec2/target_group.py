@@ -1,4 +1,3 @@
-
 from typing import Optional
 
 from botocore.exceptions import ClientError
@@ -15,10 +14,10 @@ class TargetGroup(BaseNode):
     @property
     def read_id(self) -> Optional[str]:
         return self.name
-    
+
     @classmethod
-    def read(self,session,G,g_id,read_id):
-        tg = read_target_group(session,read_id)
+    def read(self, session, G, g_id, read_id):
+        tg = read_target_group(session, read_id)
 
         protocol = tg.get("Protocol", "UNKNOWN")
         port = tg.get("Port", 0)
@@ -31,34 +30,34 @@ class TargetGroup(BaseNode):
             desc=desc_str,
             vpc_id=tg["VpcId"],
             target_type=tg["TargetType"],
-            arn=tg["TargetGroupArn"]
+            arn=tg["TargetGroupArn"],
         )
-        
-        #return tg
+
+        # return tg
 
 
 def create_target_group(session, tg, region="us-east-1"):
-    elb = session.client('elbv2', region_name=region)
+    elb = session.client("elbv2", region_name=region)
     # Step 3: Create a Target Group
     response = elb.create_target_group(
         Name=tg.id,
-        Protocol='HTTP',
+        Protocol="HTTP",
         Port=80,
         VpcId=tg.vpc_id,
-        HealthCheckProtocol='HTTP',
-        HealthCheckPort='80',
-        HealthCheckPath='/',
-        TargetType=tg.target_type
+        HealthCheckProtocol="HTTP",
+        HealthCheckPort="80",
+        HealthCheckPath="/",
+        TargetType=tg.target_type,
     )
 
-    target_group_arn = response['TargetGroups'][0]['TargetGroupArn']
+    target_group_arn = response["TargetGroups"][0]["TargetGroupArn"]
     print(f"Target Group ARN: {target_group_arn}")
 
-#docbot_alb_tg = TargetGroup(id="docbot-alb-tg",desc="Docbot Target Group",vpc_id="vpc-9f14cbfb",target_type="ip")
+
+# docbot_alb_tg = TargetGroup(id="docbot-alb-tg",desc="Docbot Target Group",vpc_id="vpc-9f14cbfb",target_type="ip")
 
 
-def read_target_group(session,tg_identifier, region_name = "us-east-1"):
-    
+def read_target_group(session, tg_identifier, region_name="us-east-1"):
     elbv2 = session.client("elbv2", region_name=region_name)
 
     # Decide whether it's an ARN or a Name
