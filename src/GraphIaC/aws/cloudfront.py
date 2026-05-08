@@ -1,11 +1,11 @@
-#https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html
-
-
 import json
 from typing import List, Optional
 
-from gbase import GBase
+
 from pydantic import BaseModel
+
+from gbase import GBase
+
 
 
 class CacheBehavior(DefaultCacheBehavior):
@@ -63,97 +63,6 @@ class CloudfrontDistribution(GBase):
         pass
     def delete(self,session,G):
         pass
-
-
-
-"""
-import boto3
-import json
-
-# Initialize the CloudFront client
-cloudfront_client = boto3.client('cloudfront')
-
-# Replace with your CloudFront distribution ID
-distribution_id = 'YOUR_DISTRIBUTION_ID'
-
-try:
-    # Retrieve the distribution configuration and ETag
-    response = cloudfront_client.get_distribution_config(Id=distribution_id)
-    distribution_config = response['DistributionConfig']
-    
-    # Access the DefaultCacheBehavior
-    default_cache_behavior = distribution_config.get('DefaultCacheBehavior', {})
-    
-    # Access the CacheBehaviors (additional behaviors)
-    cache_behaviors = distribution_config.get('CacheBehaviors', {}).get('Items', [])
-    
-    # Display the DefaultCacheBehavior
-    print("Default Cache Behavior:")
-    print(json.dumps(default_cache_behavior, indent=4, default=str))
-    print("\n")
-    
-    # Display each CacheBehavior
-    if cache_behaviors:
-        print("Additional Cache Behaviors:")
-        for idx, behavior in enumerate(cache_behaviors, start=1):
-            print(f"Cache Behavior {idx}:")
-            print(json.dumps(behavior, indent=4, default=str))
-            print("\n")
-    else:
-        print("No additional Cache Behaviors found.")
-        
-except cloudfront_client.exceptions.NoSuchDistribution:
-    print(f"Distribution with ID '{distribution_id}' does not exist.")
-except Exception as e:
-    print(f"An error occurred: {e}")
-
-
-That is great. Working with the straight json for the behavior can lead to errors. Can you help me with a pydantic model for that behaviors. Then we can import from json and export back out to json.
-"""
-
-
-
-"""
-read
-
-import boto3
-import json
-
-# Initialize the CloudFront client
-cloudfront_client = boto3.client('cloudfront')
-
-# Replace with your CloudFront distribution ID
-distribution_id = 'YOUR_DISTRIBUTION_ID'
-
-try:
-    # Retrieve the distribution configuration and metadata
-    response = cloudfront_client.get_distribution(
-        Id=distribution_id
-    )
-    
-    # Access the distribution configuration and metadata
-    distribution = response['Distribution']
-    
-    # Pretty-print the distribution settings
-    print(json.dumps(distribution, indent=4, default=str))
-    
-except cloudfront_client.exceptions.NoSuchDistribution:
-    print(f"Distribution with ID '{distribution_id}' does not exist.")
-except Exception as e:
-    print(f"An error occurred: {e}")
-
-"""
-
-# Initialize clients
-#cloudfront_client = boto3.client('cloudfront')
-#acm_client = boto3.client('acm')
-#s3_client = boto3.client('s3')
-
-# Parameters (replace with your actual values)
-#bucket_name = 'your-s3-bucket-name'
-#custom_domain = 'your.custom.domain.com'
-#certificate_arn = 'arn:aws:acm:us-east-1:123456789012:certificate/your-certificate-id'  # Must be in us-east-1
-#distribution_comment = 'CloudFront distribution with custom domain, ACM certificate, and OAC'
 
 def create_oac():
     # Step 1: Create an Origin Access Control (OAC)
@@ -227,51 +136,7 @@ def create_distribution():
     )
 
     
-#distribution_id = response_distribution['Distribution']['Id']
-#distribution_domain_name = response_distribution['Distribution']['DomainName']
 
-#print(f"CloudFront distribution '{distribution_id}' created with domain name '{distribution_domain_name}'")
-#print(f"OAC ID: {oac_id}")
-
-# Step 3: Update S3 bucket policy to allow access from CloudFront OAC
-# Get the CloudFront service principal for your region
-#cloudfront_service_principal = 'cloudfront.amazonaws.com'
-
-"""
-# Construct the policy
-bucket_policy = {
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "AllowCloudFrontServicePrincipalReadOnly",
-            "Effect": "Allow",
-            "Principal": {
-                "Service": cloudfront_service_principal
-            },
-            "Action": "s3:GetObject",
-            "Resource": f"arn:aws:s3:::{bucket_name}/*",
-            "Condition": {
-                "StringEquals": {
-                    "AWS:SourceArn": f"arn:aws:cloudfront::{boto3.client('sts').get_caller_identity()['Account']}:distribution/{distribution_id}"
-                }
-            }
-        }
-    ]
-}
-"""
-
-## Update the bucket policy
-#s3_client.put_bucket_policy(
-#    Bucket=bucket_name,
-#    Policy=json.dumps(bucket_policy)
-#)
-
-#print(f"S3 bucket policy updated to allow access from OAC.")
-
-
-from typing import List, Optional
-
-from pydantic import BaseModel
 
 
 class TrustedSigners(BaseModel):

@@ -132,18 +132,6 @@ def role_exists(session,role_name):
 
     return True
 
-"""
-def role_create(session,role_name,policy_document):
-    iam_client = session.client('iam')
-
-    create_role_response = iam_client.create_role(
-        RoleName=role_name,
-        AssumeRolePolicyDocument=json.dumps(policy_document),
-        Description='Role for Lambda execution',
-    )
-    role_arn = create_role_response['Role']['Arn']
-    return role_arn
-"""
 
 def role_create(session, role_name, policy_document, wait=True, max_wait_seconds=30):
     iam_client = session.client("iam")

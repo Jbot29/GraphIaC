@@ -166,87 +166,8 @@ def lambda_create(session,function_name,runtime,role_arn,handler,description,tim
         MemorySize=memory_size,
         Publish=publish
     )
-    
-"""
-
-def update_lambda_code(lambda_client, function_name, zip_file_path):
-    try:
-        # Open the new zip file to update the Lambda function
-        with open(zip_file_path, 'rb') as zip_file:
-            response = lambda_client.update_function_code(
-                FunctionName=function_name,
-                ZipFile=zip_file.read()  # Upload the new zip file content
-            )
-        
-        # Print the response from Lambda after updating the function
-        print("Lambda function updated successfully!")
-        print("Response:", response)
-
-    except Exception as e:
-        print("Error updating Lambda function:", e)
-
-# Initialize the Lambda client
-lambda_client = boto3.client('lambda', region_name='us-east-1')
-
-# Specify the Lambda function name and path to the new zip file
-function_name = 'my-lambda-function'
-zip_file_path = 'lambda_code.zip'
-
-# Call the update function
-update_lambda_code(lambda_client, function_name, zip_file_path)
 
 
-# ---------------------------------------
-# 2. Zip your Lambda function code
-# ---------------------------------------
-# Suppose you have a file named 'lambda_function.py' in the current directory
-lambda_file = 'lambda_function.py'
-zip_file_name = 'function.zip'
-
-print(f"Zipping code from {lambda_file} into {zip_file_name}...")
-with zipfile.ZipFile(zip_file_name, 'w', zipfile.ZIP_DEFLATED) as zipf:
-    zipf.write(lambda_file)
-
-# ---------------------------------------
-# 3. Create the Lambda function
-# ---------------------------------------
-
-
-
-
-
-print("Lambda function created successfully!")
-print(f"Function ARN: {create_fn_response['FunctionArn']}")
-
-
-lambda_client.update_function_code(
-    FunctionName='MyFirstLambdaFunction',
-    ZipFile=zip_bytes
-)
-
-
-lambda_client.update_function_configuration(
-    FunctionName='MyFirstLambdaFunction',
-    MemorySize=256,
-    Environment={
-        'Variables': {
-            'LOG_LEVEL': 'DEBUG'
-        }
-    }
-)
-
-Environment={
-    'Variables': {
-        'MY_VAR': 'my_value'
-    }
-}
-
-
-lambda_client.delete_function(FunctionName='MyFirstLambdaFunction')
-"""
-
-
-from typing import Optional
 
 
 def lambda_read(session,func_name,region):

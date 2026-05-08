@@ -205,15 +205,3 @@ def check_certificate_status(certificate_arn):
             break
         time.sleep(30)  # Wait and recheck status every 30 seconds
 
-# Usage
-
-"""
-domain_name = 'example.com'  # Replace with your domain
-hosted_zone_id = 'Z3P5QSUBK4POTI'  # Replace with your hosted zone ID
-
-certificate_arn = request_certificate(domain_name, hosted_zone_id)
-
-if certificate_arn:
-    add_dns_validation(certificate_arn, hosted_zone_id, domain_name)
-    check_certificate_status(certificate_arn)
-"""

@@ -8,11 +8,6 @@ from .iam_policy import (
 )
 from .iam_role import IAMRoleInlinePolicyEdge
 
-"""
-
-
-"""
-
 class LambdaDynamoEdge(IAMRoleInlinePolicyEdge):
     role_g_id: str 
     lambda_node_g_id: str
