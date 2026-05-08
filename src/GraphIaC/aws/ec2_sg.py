@@ -1,10 +1,10 @@
-import boto3
 
-from pydantic import BaseModel
-from typing import Optional,List
+from typing import Optional
+
 from botocore.exceptions import ClientError
 
 from ..models import BaseNode
+
 """
 
 ec2 = session.client('ec2',region_name='us-east-1')

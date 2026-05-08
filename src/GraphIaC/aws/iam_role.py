@@ -1,14 +1,14 @@
-import boto3
-import time
 import json
-from botocore.exceptions import ClientError
-from pydantic import BaseModel,constr,Field,AliasChoices
-from typing import Optional,List
-from GraphIaC.models import BaseNode,BaseEdge
+import time
+from typing import Optional
 
+from botocore.exceptions import ClientError
+
+from GraphIaC.models import BaseEdge, BaseNode
+
+from .iam_policy import IamPolicyDocument, IamTrustPolicyDocument
 from .types import AwsName
 
-from .iam_policy import IamPolicyDocument,IamTrustPolicyDocument
 """
 IAM Role
 │

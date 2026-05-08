@@ -1,9 +1,13 @@
-from typing import Optional, Literal, Dict
+from typing import Optional
 
-from .iam_role import IAMRolePolicyEdge,IAMRoleInlinePolicyEdge
+from .iam_policy import (
+    IamPolicyDocument,
+    IamPolicyStatement,
+    get_inline_policy_for_role,
+    put_inline_policy_for_role,
+)
+from .iam_role import IAMRoleInlinePolicyEdge
 
-from .iam_policy import IamPolicyDocument,IamPolicyStatement,get_inline_policy_for_role,put_inline_policy_for_role
-from GraphIaC.models import BaseNode,BaseEdge
 """
 
 

@@ -1,7 +1,6 @@
-from typing import Any, Literal, List
+from typing import Any, List, Literal
+
 from pydantic import BaseModel
-import json
-import urllib.parse
 
 
 class IamPolicyStatement(BaseModel):
@@ -150,10 +149,9 @@ def delete_statement_for_role(
     return policy_doc
 
 
-from typing import Any, Literal, List
-from pydantic import BaseModel, Field
-import json
+from typing import Any, List, Literal
 
+from pydantic import BaseModel, Field
 
 # ---------- TRUST POLICY MODELS ---------- #
 

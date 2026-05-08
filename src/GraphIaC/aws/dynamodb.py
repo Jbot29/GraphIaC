@@ -1,10 +1,11 @@
 
-from typing import Optional, Literal, Dict
-from pydantic import BaseModel, Field
-import boto3
+from typing import Dict, Literal, Optional
+
 from botocore.exceptions import ClientError
+from pydantic import BaseModel, Field
 
 from GraphIaC.models import BaseNode
+
 from ..logs import setup_logger
 
 logger = setup_logger()
@@ -161,7 +162,7 @@ class DynamoTable(BaseNode):
             waiter = dynamodb.get_waiter("table_exists")
             waiter.wait(TableName=self.table_name)
             return resp
-        except ClientError as e:
+        except ClientError:
             raise
 
     def delete(self, session, G):
@@ -173,5 +174,5 @@ class DynamoTable(BaseNode):
             waiter = dynamodb.get_waiter("table_not_exists")
             waiter.wait(TableName=self.table_name)
             return resp
-        except ClientError as e:
+        except ClientError:
             raise

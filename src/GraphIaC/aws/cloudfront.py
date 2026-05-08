@@ -1,17 +1,12 @@
 #https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html
 
 
-import boto3
 import json
+from typing import List, Optional
 
-
-import time
-import boto3
-from botocore.exceptions import ClientError
-
-from pydantic import BaseModel
-from typing import Optional,List
 from gbase import GBase
+from pydantic import BaseModel
+
 
 class CacheBehavior(DefaultCacheBehavior):
     PathPattern: str
@@ -274,8 +269,10 @@ bucket_policy = {
 #print(f"S3 bucket policy updated to allow access from OAC.")
 
 
-from pydantic import BaseModel, Field
 from typing import List, Optional
+
+from pydantic import BaseModel
+
 
 class TrustedSigners(BaseModel):
     Enabled: bool

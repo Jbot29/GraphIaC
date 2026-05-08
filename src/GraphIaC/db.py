@@ -1,9 +1,9 @@
 
 import sqlite3
-import json
+from typing import Any
 
 from pydantic import BaseModel, Field
-from typing import Any
+
 #load from db
 #dog = Dog.model_validate(from_json(partial_dog_json, allow_partial=True))
 """

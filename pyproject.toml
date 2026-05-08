@@ -21,6 +21,13 @@ dependencies = [
   "pytz"
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "ruff",
+  "moto[all]",
+]
+
 [project.urls]
 Homepage = "https://github.com/pypa/sampleproject"
 Issues = "https://github.com/pypa/sampleproject/issues"
@@ -30,23 +37,8 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.ruff]
-target-version = "py313"  # change if needed
+target-version = "py313"
 line-length = 100
-
-# Start small: basic sanity rules, import sorting, and a few common footguns.
-select = [
-  "E",   # pycodestyle errors
-  "F",   # pyflakes
-  "I",   # isort (import sorting)
-  "T201",  # disallow print()
-]
-
-# Ignore rules that tend to create noise early in a legacy repo.
-ignore = [
-  "E501", # line length (let black/formatter handle later)
-]
-
-# Optional: exclude generated/venv/build dirs
 exclude = [
   ".venv",
   "venv",
@@ -55,6 +47,12 @@ exclude = [
   "__pycache__",
 ]
 
-[tool.black]
-line-length = 100
-target-version = ["py313"]
+[tool.ruff.lint]
+select = [
+  "E",  # pycodestyle errors
+  "F",  # pyflakes
+  "I",  # isort (import sorting)
+]
+ignore = [
+  "E501", # line length — formatter handles this
+]

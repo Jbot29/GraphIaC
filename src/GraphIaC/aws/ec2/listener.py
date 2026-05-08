@@ -1,10 +1,10 @@
-import boto3
+from typing import Optional
 
-from pydantic import BaseModel
-from typing import Optional,List
+import boto3
 from botocore.exceptions import ClientError
 
 from GraphIaC.models import BaseNode
+
 
 class Listener(BaseNode):
     arn: str

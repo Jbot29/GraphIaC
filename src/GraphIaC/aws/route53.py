@@ -1,7 +1,9 @@
 from typing import Optional
+
 from botocore.exceptions import ClientError
 
 from GraphIaC.models import BaseNode
+
 from ..logs import setup_logger
 
 logger = setup_logger()
@@ -40,5 +42,5 @@ class HostedZone(BaseNode):
         route53 = session.client("route53")
         try:
             route53.delete_hosted_zone(Id=self.zone_id)
-        except ClientError as e:
+        except ClientError:
             raise

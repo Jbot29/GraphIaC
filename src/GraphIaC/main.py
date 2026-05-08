@@ -1,21 +1,22 @@
 
-import networkx as nx
-import boto3
-from enum import Enum
-from pydantic import BaseModel,Field
-from pydantic import validator
-from typing import Optional,List, Any
-from botocore.exceptions import ClientError
 import sqlite3
-import logging
-import colorlog
-from .db import create_tables,get_node_by_id,get_edge_by_id,db_create_node,db_get_rows_not_in_list,db_delete_row,db_create_edge
+from enum import Enum
+from typing import Any
 
-from GraphIaC.aws.route53 import HostedZone
-from GraphIaC.aws.certificate import Certificate,CertificateHostedZoneEdge,get_dns_validation
+import networkx as nx
+from pydantic import BaseModel, Field, validator
 
 from GraphIaC.model_map import BASE_MODEL_MAP
 
+from .db import (
+    create_tables,
+    db_create_edge,
+    db_create_node,
+    db_delete_row,
+    db_get_rows_not_in_list,
+    get_edge_by_id,
+    get_node_by_id,
+)
 from .logs import setup_logger
 
 logger = setup_logger()

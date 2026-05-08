@@ -1,14 +1,14 @@
 import os
-import zipfile
-import boto3
-from botocore.exceptions import ClientError
-from pydantic import BaseModel,constr,Field
-from typing import Optional,List
-from ..models import BaseNode
+from typing import Optional
 
-from .types import AwsName
-from .iam_role import IAMRolePolicyEdge,attach_role_policy
+from botocore.exceptions import ClientError
+from pydantic import Field
+
+from ..models import BaseNode
 from .iam_policy import IamTrustPolicyStatement
+from .iam_role import IAMRolePolicyEdge, attach_role_policy
+from .types import AwsName
+
 # TODO: Zipfile compare sha
 
 assume_role_policy_document = {
@@ -246,8 +246,8 @@ lambda_client.delete_function(FunctionName='MyFirstLambdaFunction')
 """
 
 
-import boto3
 from typing import Optional
+
 
 def lambda_read(session,func_name,region):
     lambda_client = session.client('lambda',region_name=region)

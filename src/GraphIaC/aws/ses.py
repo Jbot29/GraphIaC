@@ -1,11 +1,18 @@
-from typing import Optional, List
+from typing import List, Optional
+
 from botocore.exceptions import ClientError
 
-from GraphIaC.models import BaseNode, BaseEdge
-from .iam_role import IAMRoleInlinePolicyEdge
-from .iam_policy import IamPolicyDocument, IamPolicyStatement, get_inline_policy_for_role, put_inline_policy_for_role
-from .route53 import HostedZone
+from GraphIaC.models import BaseEdge, BaseNode
+
 from ..logs import setup_logger
+from .iam_policy import (
+    IamPolicyDocument,
+    IamPolicyStatement,
+    get_inline_policy_for_role,
+    put_inline_policy_for_role,
+)
+from .iam_role import IAMRoleInlinePolicyEdge
+from .route53 import HostedZone
 
 logger = setup_logger()
 
@@ -63,7 +70,7 @@ class SESDomainIdentity(BaseNode):
         ses = session.client("sesv2", region_name=self.region)
         try:
             ses.delete_email_identity(EmailIdentity=self.domain)
-        except ClientError as e:
+        except ClientError:
             raise
 
 
@@ -169,7 +176,7 @@ class SESDomainRoute53Edge(BaseEdge):
                 HostedZoneId=zone_node.zone_id,
                 ChangeBatch={"Changes": changes},
             )
-        except ClientError as e:
+        except ClientError:
             raise
 
 

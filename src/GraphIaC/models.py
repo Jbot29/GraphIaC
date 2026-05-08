@@ -1,7 +1,8 @@
-from pydantic import BaseModel
+from typing import Optional
 
 from deepdiff import DeepDiff
-from typing import Optional, Literal, Dict
+from pydantic import BaseModel
+
 
 class BaseNode(BaseModel):
     g_id: str    
