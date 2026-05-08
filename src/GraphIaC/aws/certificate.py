@@ -1,8 +1,9 @@
-import boto3
 import time
+from typing import List
+
+import boto3
 from botocore.exceptions import ClientError
 from pydantic import BaseModel
-from typing import Optional,List
 
 
 class CertificateHostedZoneEdge(BaseModel):

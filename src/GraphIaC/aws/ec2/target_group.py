@@ -1,7 +1,6 @@
-import boto3
 
-from pydantic import BaseModel
-from typing import Optional,List
+from typing import Optional
+
 from botocore.exceptions import ClientError
 
 from GraphIaC.models import BaseNode

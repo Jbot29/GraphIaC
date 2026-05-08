@@ -1,9 +1,9 @@
-import time
+from typing import Optional
+
 import boto3
 from botocore.exceptions import ClientError
-
 from pydantic import BaseModel
-from typing import Optional,List
+
 
 class S3Bucket(BaseModel):
     g_id: str    
@@ -97,6 +97,7 @@ def set_private_s3_bucket(bucket_name, region=None):
         return None
 
 import boto3
+
 
 def delete_s3_bucket(session,bucket_name, region=None):
     """

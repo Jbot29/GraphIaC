@@ -1,10 +1,12 @@
 import argparse
 import importlib.util
 import os
-import boto3
-import GraphIaC
 import sqlite3
-from .db import create_tables
+
+import boto3
+
+import GraphIaC
+
 from .logs import setup_logger
 
 logger = setup_logger()

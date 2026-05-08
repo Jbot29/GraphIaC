@@ -1,15 +1,15 @@
 
-from GraphIaC.aws.route53 import HostedZone
-from GraphIaC.aws.certificate import Certificate,CertificateHostedZoneEdge,get_dns_validation
-from GraphIaC.aws.s3 import S3Bucket
-from GraphIaC.aws.iam_role import IAMRole
-from GraphIaC.aws.ec2_sg import SecurityGroup
+from GraphIaC.aws.apigateway import ApiEndpoint, ApiSite
+from GraphIaC.aws.certificate import Certificate, CertificateHostedZoneEdge
+from GraphIaC.aws.dynamodb import DynamoTable
 from GraphIaC.aws.ec2.alb import ALB
 from GraphIaC.aws.ec2.listener import Listener
-from GraphIaC.aws.dynamodb import DynamoTable
+from GraphIaC.aws.ec2_sg import SecurityGroup
+from GraphIaC.aws.iam_role import IAMRole
 from GraphIaC.aws.lambda_func import LambdaZipFile
-from GraphIaC.aws.apigateway import ApiSite,ApiEndpoint
-from GraphIaC.aws.ses import SESDomainIdentity,SESDomainRoute53Edge,LambdaSESEdge
+from GraphIaC.aws.route53 import HostedZone
+from GraphIaC.aws.s3 import S3Bucket
+from GraphIaC.aws.ses import LambdaSESEdge, SESDomainIdentity, SESDomainRoute53Edge
 
 #todo find a better way to do this
 

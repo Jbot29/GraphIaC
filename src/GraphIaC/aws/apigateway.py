@@ -1,23 +1,9 @@
 
-import boto3
-
-from pydantic import BaseModel
-from typing import Optional,List
-from botocore.exceptions import ClientError
-
-from GraphIaC.models import BaseNode
-
-
-from typing import Optional, Literal, Dict
-from pydantic import BaseModel, Field, validator
-import boto3
-from botocore.exceptions import ClientError
-from GraphIaC.models import BaseNode,BaseEdge
-
-from typing import Optional, Literal
+from typing import List, Literal, Optional
 
 import boto3
-from pydantic import BaseModel
+
+from GraphIaC.models import BaseEdge, BaseNode
 
 from ..logs import setup_logger
 
