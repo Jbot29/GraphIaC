@@ -1,4 +1,3 @@
-
 import sqlite3
 from typing import Any
 
@@ -9,8 +8,8 @@ from .logs import setup_logger
 logger = setup_logger()
 
 
-#Todo
-#turn tables into Pydantic models
+# Todo
+# turn tables into Pydantic models
 
 
 class TableNode(BaseModel):
@@ -18,7 +17,7 @@ class TableNode(BaseModel):
     g_id: str
     type: str
     data: Any
-    __tablename__ = 'nodes'
+    __tablename__ = "nodes"
 
     @classmethod
     def create_table_sql(cls) -> str:
@@ -29,15 +28,17 @@ class TableNode(BaseModel):
             type TEXT,
             data JSON
         );
-        """    
+        """
+
+
 class TableEdge(BaseModel):
     id: int | None = Field(default=None)
-    g_id: str | None = None        # UNIQUE text ID
-    source: int                    # FK → nodes.id
-    destination: int               # FK → nodes.id
+    g_id: str | None = None  # UNIQUE text ID
+    source: int  # FK → nodes.id
+    destination: int  # FK → nodes.id
     weight: float | None = None
     type: str | None = None
-    data: Any = None               # JSON payload
+    data: Any = None  # JSON payload
 
     @classmethod
     def create_table_sql(cls) -> str:
@@ -56,7 +57,7 @@ class TableEdge(BaseModel):
         );
         """
 
-    
+
 def create_tables(conn):
     cursor = conn.cursor()
 
@@ -69,9 +70,7 @@ def create_tables(conn):
     conn.commit()
 
 
-    
-def db_create_node(conn,node):
-
+def db_create_node(conn, node):
     node_name = node.g_id
     node_type = node.__class__.__name__
     node_data = node.model_dump_json()
@@ -79,11 +78,14 @@ def db_create_node(conn,node):
     cursor = conn.cursor()
     try:
         # Insert a new row into the table
-        cursor.execute('''
+        cursor.execute(
+            """
             INSERT INTO nodes (g_id, type, data)
             VALUES (?, ?, ?)
-        ''', (node_name, node_type, node_data))
-        
+        """,
+            (node_name, node_type, node_data),
+        )
+
         # Commit the transaction
         conn.commit()
         print("Row inserted successfully.")
@@ -91,19 +93,23 @@ def db_create_node(conn,node):
     except sqlite3.IntegrityError as e:
         # Handle unique constraint failure for the name field
         print(f"Error: {e}")
-    
+
     finally:
-        #conn.close()
+        # conn.close()
         pass
 
-def get_node_by_id(conn,name):
+
+def get_node_by_id(conn, name):
     cursor = conn.cursor()
     try:
         # Execute the query to find the node's ID by name
-        cursor.execute('''
+        cursor.execute(
+            """
             SELECT * FROM nodes WHERE g_id = ?
-        ''', (name,))
-        
+        """,
+            (name,),
+        )
+
         # Fetch the result
         result = cursor.fetchone()
 
@@ -113,19 +119,23 @@ def get_node_by_id(conn,name):
         else:
             print(f"Node '{name}' does not exist.")
             return None
-    
+
     except sqlite3.IntegrityError as e:
         # Handle unique constraint failure for the name field
         print(f"Error: {e}")
 
-def get_edge_by_id(conn,s_name,d_name):
+
+def get_edge_by_id(conn, s_name, d_name):
     cursor = conn.cursor()
     try:
         # Execute the query to find the node's ID by name
-        cursor.execute('''
+        cursor.execute(
+            """
             SELECT * FROM edges WHERE source = ? and destination = ?
-        ''', (s_name,d_name))
-        
+        """,
+            (s_name, d_name),
+        )
+
         # Fetch the result
         result = cursor.fetchone()
 
@@ -135,58 +145,64 @@ def get_edge_by_id(conn,s_name,d_name):
         else:
             print(f"Node '{s_name}' does not exist.")
             return None
-    
+
     except sqlite3.IntegrityError as e:
         # Handle unique constraint failure for the name field
         print(f"Error: {e}")
 
-        
-def db_create_edge(conn,source_name, destination_name, edge,weight=1):
+
+def db_create_edge(conn, source_name, destination_name, edge, weight=1):
     edge_type = edge.__class__.__name__
     edge_data = edge.model_dump_json()
 
-    source = get_node_by_id(conn,source_name)[0]
-    destination = get_node_by_id(conn,destination_name)[0]
+    source = get_node_by_id(conn, source_name)[0]
+    destination = get_node_by_id(conn, destination_name)[0]
 
     cursor = conn.cursor()
     try:
-        cursor.execute('''
+        cursor.execute(
+            """
             INSERT INTO edges (source, destination, weight, type,data)
             VALUES (?, ?, ?, ?, ?)
-        ''', (source, destination, weight, edge_type,edge_data))
-        
+        """,
+            (source, destination, weight, edge_type, edge_data),
+        )
+
         conn.commit()
         logger.debug("Edge added successfully.")
-    
+
     except sqlite3.IntegrityError as e:
         print(f"Error: {e}")
-    
+
     finally:
-        #conn.close()
+        # conn.close()
         pass
 
 
 def name_exists(conn, name):
     # Connect to the SQLite database
-    #conn = sqlite3.connect("example.db")
+    # conn = sqlite3.connect("example.db")
     cursor = conn.cursor()
-    
+
     # Execute a query to check for the existence of the name
-    cursor.execute('''
+    cursor.execute(
+        """
         SELECT EXISTS(SELECT 1 FROM my_table WHERE g_id = ?)
-    ''', (name,))
-    
+    """,
+        (name,),
+    )
+
     # Fetch the result (0 or 1)
     exists = cursor.fetchone()[0]
-    
+
     # Close the connection
-    #conn.close()
-    
+    # conn.close()
+
     # Return True if name exists, otherwise False
     return exists == 1
 
-def db_get_rows_not_in_list(conn, table_name, id_list):
 
+def db_get_rows_not_in_list(conn, table_name, id_list):
     cursor = conn.cursor()
 
     if not id_list:
@@ -198,19 +214,17 @@ def db_get_rows_not_in_list(conn, table_name, id_list):
     try:
         # Execute the query and pass the id_tuple as parameters
         cursor.execute(query)
-        
+
         # Fetch all results
         return cursor.fetchall()
-        
 
     finally:
         # Close the connection
-        #conn.close()
+        # conn.close()
         pass
 
 
 # delete row
-
 
 
 def db_delete_row(db_conn, table_name, row_id):
@@ -232,7 +246,7 @@ def db_delete_row(db_conn, table_name, row_id):
 
         # Execute the query with the provided ID
         cursor.execute(sql_query, (row_id,))
-        
+
         # Commit the transaction
         db_conn.commit()
 
@@ -240,10 +254,8 @@ def db_delete_row(db_conn, table_name, row_id):
 
     except sqlite3.Error as e:
         print(f"Error deleting row from '{table_name}' table: {e}")
-    
+
     finally:
         # Close the connection
-        #conn.close()
+        # conn.close()
         pass
-
-            

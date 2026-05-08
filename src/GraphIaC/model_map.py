@@ -1,4 +1,3 @@
-
 from GraphIaC.aws.apigateway import ApiEndpoint, ApiSite
 from GraphIaC.aws.certificate import Certificate, CertificateHostedZoneEdge
 from GraphIaC.aws.dynamodb import DynamoTable
@@ -11,7 +10,7 @@ from GraphIaC.aws.route53 import HostedZone
 from GraphIaC.aws.s3 import S3Bucket
 from GraphIaC.aws.ses import LambdaSESEdge, SESDomainIdentity, SESDomainRoute53Edge
 
-#todo find a better way to do this
+# todo find a better way to do this
 
 
 BASE_MODEL_MAP = {

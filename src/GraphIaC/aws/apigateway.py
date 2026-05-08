@@ -1,4 +1,3 @@
-
 from typing import List, Literal, Optional
 
 import boto3
@@ -9,53 +8,47 @@ from ..logs import setup_logger
 
 logger = setup_logger()
 
+
 class ApiSite(BaseNode):
     site_name: str
     protocol: Literal["HTTP"] = "HTTP"
     stage: str = "$default"
-    base_path: str = "/"    # for future nesting, versioning, etc.
+    base_path: str = "/"  # for future nesting, versioning, etc.
     region: str = "us-east-2"
     cors_origins: List[str] = []
 
     @property
     def read_id(self) -> Optional[str]:
-
         return self.site_name
 
     @classmethod
-    def read(self,session,G,g_id,read_id,region="us-east-2"):
+    def read(self, session, G, g_id, read_id, region="us-east-2"):
+        return get_api_site(session, g_id, read_id, region)
 
-        return get_api_site(session, g_id,read_id, region)
-
-
-    def create(self,session,G):
+    def create(self, session, G):
         create_api_site(session, self)
         return True
 
-    def update(self,session,G):
+    def update(self, session, G):
         update_api_site(session, self)
         return True
-        
-    
+
 
 class ApiEndpoint(BaseNode):
-    """ This node is weird in that it doesn't actually write anything to aws and is metadata only, the edge updates aws """
-    endpoint_name: str 
-    path: str          
+    """This node is weird in that it doesn't actually write anything to aws and is metadata only, the edge updates aws"""
+
+    endpoint_name: str
+    path: str
     method: Literal["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 
     @property
     def read_id(self) -> Optional[str]:
         print(f"W: {self.method}")
-        return _route_key_for_endpoint(self.path,self.method)        
-
-    
+        return _route_key_for_endpoint(self.path, self.method)
 
     @classmethod
-    def read(self,session,G,g_id,read_id,region="us-east-2"):
-
-        return G.nodes[g_id]['data']
-
+    def read(self, session, G, g_id, read_id, region="us-east-2"):
+        return G.nodes[g_id]["data"]
 
 
 class SiteEndpointEdge(BaseEdge):
@@ -65,28 +58,24 @@ class SiteEndpointEdge(BaseEdge):
     @property
     def source_g_id(self) -> str:
         return self.site_node_g_id
-    
+
     @property
     def destination_g_id(self) -> str:
         return self.endpoint_node_g_id
 
-        
-    def read(self,session,G):
-        site = G.nodes[self.site_node_g_id]['data']
-        endpoint = G.nodes[self.endpoint_node_g_id]['data']
-        return endpoint_exists_on_site(session,site,endpoint)
+    def read(self, session, G):
+        site = G.nodes[self.site_node_g_id]["data"]
+        endpoint = G.nodes[self.endpoint_node_g_id]["data"]
+        return endpoint_exists_on_site(session, site, endpoint)
 
-    def create(self,session,G):
+    def create(self, session, G):
+        site = G.nodes[self.site_node_g_id]["data"]
+        endpoint = G.nodes[self.endpoint_node_g_id]["data"]
 
-        site = G.nodes[self.site_node_g_id]['data']
-        endpoint = G.nodes[self.endpoint_node_g_id]['data']
-        
-        attach_endpoint_to_site(
-            session,
-            site,
-            endpoint)
+        attach_endpoint_to_site(session, site, endpoint)
 
         return True
+
 
 class EndpointLambdaEdge(BaseEdge):
     endpoint_node_g_id: str
@@ -95,55 +84,42 @@ class EndpointLambdaEdge(BaseEdge):
     @property
     def source_g_id(self) -> str:
         return self.endpoint_node_g_id
-    
+
     @property
     def destination_g_id(self) -> str:
         return self.lambda_node_g_id
 
-    def read(self,session,G):
-        endpoint = G.nodes[self.endpoint_node_g_id]['data']
+    def read(self, session, G):
+        endpoint = G.nodes[self.endpoint_node_g_id]["data"]
         site_node = None
         for g_id, _, data in G.in_edges(self.endpoint_node_g_id, data=True):
-            if isinstance(data['data'], SiteEndpointEdge):
-                site_node = G.nodes[g_id]['data']
+            if isinstance(data["data"], SiteEndpointEdge):
+                site_node = G.nodes[g_id]["data"]
 
         if not site_node:
             return None
-        
-        r = get_route_lambda_attachment(
-            session,
-            site_node,
-            endpoint.method,
-            endpoint.path)
+
+        r = get_route_lambda_attachment(session, site_node, endpoint.method, endpoint.path)
 
         print(r)
-        if not r['attached']:
+        if not r["attached"]:
             return None
-        
+
         return self
 
-
-
-
-    def create(self,session,G):
-        lambda_node = G.nodes[self.lambda_node_g_id]['data']
-        endpoint = G.nodes[self.endpoint_node_g_id]['data']
+    def create(self, session, G):
+        lambda_node = G.nodes[self.lambda_node_g_id]["data"]
+        endpoint = G.nodes[self.endpoint_node_g_id]["data"]
         site_node = None
         for g_id, _, data in G.in_edges(self.endpoint_node_g_id, data=True):
-            if isinstance(data['data'], SiteEndpointEdge):
-                site_node = G.nodes[g_id]['data']
+            if isinstance(data["data"], SiteEndpointEdge):
+                site_node = G.nodes[g_id]["data"]
 
         if not site_node:
             return None
 
         print(f"L:{lambda_node}")
-        attach_route_to_lambda(
-            session,
-            site_node,
-            endpoint.method,
-            endpoint.path,
-            lambda_node.name)
-        
+        attach_route_to_lambda(session, site_node, endpoint.method, endpoint.path, lambda_node.name)
 
 
 def _find_api_by_name(client, name: str) -> Optional[dict]:
@@ -187,7 +163,7 @@ def create_api_site(session: boto3.session.Session, site: ApiSite) -> dict:
     Returns the raw create_api response.
     """
 
-    client = session.client("apigatewayv2",region_name=site.region)
+    client = session.client("apigatewayv2", region_name=site.region)
 
     kwargs = dict(
         Name=site.site_name,
@@ -211,12 +187,12 @@ def create_api_site(session: boto3.session.Session, site: ApiSite) -> dict:
     return resp
 
 
-def get_api_site(session: boto3.session.Session,g_id, name: str,region) -> Optional[ApiSite]:
+def get_api_site(session: boto3.session.Session, g_id, name: str, region) -> Optional[ApiSite]:
     """
     Look up an ApiSite by its name. Returns None if it doesn't exist.
     """
 
-    client = session.client("apigatewayv2",region_name=region)
+    client = session.client("apigatewayv2", region_name=region)
     api = _find_api_by_name(client, name)
     if not api:
         print(f"API GATEWAY NOT FOUND {name}")
@@ -244,7 +220,7 @@ def update_api_site(session: boto3.session.Session, site: ApiSite) -> dict:
     """
     Update basic properties of an existing ApiSite, including CORS config.
     """
-    client = session.client("apigatewayv2",region_name=site.region)
+    client = session.client("apigatewayv2", region_name=site.region)
 
     api = _find_api_by_name(client, site.site_name)
     if not api:
@@ -276,7 +252,6 @@ def delete_api_site(session: boto3.session.Session, name: str, region: str = "us
     Returns True if deleted, False if it didn't exist.
     """
     client = session.client("apigatewayv2", region_name=region)
-
 
     api = _find_api_by_name(client, name)
     if not api:
@@ -310,7 +285,7 @@ def upsert_api_site(session: boto3.session.Session, site: ApiSite) -> dict:
     return resp
 
 
-def _route_key_for_endpoint(path,method) -> str:
+def _route_key_for_endpoint(path, method) -> str:
     """
     API Gateway HTTP API route keys look like: 'POST /newsletter'
     """
@@ -330,7 +305,6 @@ def _find_route_by_key(client, api_id: str, route_key: str) -> Optional[dict]:
     return None
 
 
-
 def attach_endpoint_to_site(
     session: boto3.session.Session,
     site: ApiSite,
@@ -342,14 +316,14 @@ def attach_endpoint_to_site(
     In AWS terms: ensure a Route exists on the HTTP API with the right method + path.
     Does NOT create an integration yet (that will be the Endpoint→Lambda edge).
     """
-    client = session.client("apigatewayv2",region_name=site.region)
+    client = session.client("apigatewayv2", region_name=site.region)
 
     api = _find_api_by_name(client, site.site_name)
     if not api:
         raise ValueError(f"ApiSite {site.site_name!r} does not exist")
 
     api_id = api["ApiId"]
-    route_key = _route_key_for_endpoint(endpoint.path,endpoint.method)
+    route_key = _route_key_for_endpoint(endpoint.path, endpoint.method)
 
     existing = _find_route_by_key(client, api_id, route_key)
     if existing:
@@ -395,20 +369,20 @@ def detach_endpoint_from_site(
     client.delete_route(ApiId=api_id, RouteId=existing["RouteId"])
     return True
 
+
 def endpoint_exists_on_site(
     session: boto3.session.Session,
     site: ApiSite,
     endpoint: ApiEndpoint,
 ) -> bool:
-    
-    client = session.client("apigatewayv2",region_name=site.region)
+    client = session.client("apigatewayv2", region_name=site.region)
 
     api = _find_api_by_name(client, site.site_name)
     if not api:
         return False  # Site doesn't exist → route can't exist.
 
     api_id = api["ApiId"]
-    route_key = _route_key_for_endpoint(endpoint.path,endpoint.method)
+    route_key = _route_key_for_endpoint(endpoint.path, endpoint.method)
 
     paginator = client.get_paginator("get_routes")
     for page in paginator.paginate(ApiId=api_id):
@@ -424,7 +398,7 @@ def api_route_to_endpoint(route: dict) -> ApiEndpoint:
     Convert an API Gateway HTTP API route into an ApiEndpoint model.
     """
     route_key = route["RouteKey"]  # e.g. "POST /newsletter"
-    
+
     # Split route key
     try:
         method, path = route_key.split(" ", 1)
@@ -444,6 +418,7 @@ def api_route_to_endpoint(route: dict) -> ApiEndpoint:
         method=method,
         path=path,
     )
+
 
 def get_endpoint_from_site(
     session: boto3.session.Session,
@@ -467,6 +442,7 @@ def get_endpoint_from_site(
 
     return api_route_to_endpoint(route)
 
+
 def _find_integration_for_lambda(client, api_id: str, lambda_arn: str) -> Optional[dict]:
     """
     Try to locate an existing integration that targets the given lambda ARN.
@@ -474,7 +450,10 @@ def _find_integration_for_lambda(client, api_id: str, lambda_arn: str) -> Option
     paginator = client.get_paginator("get_integrations")
     for page in paginator.paginate(ApiId=api_id):
         for integ in page.get("Items", []):
-            if integ.get("IntegrationUri") == lambda_arn and integ.get("IntegrationType") == "AWS_PROXY":
+            if (
+                integ.get("IntegrationUri") == lambda_arn
+                and integ.get("IntegrationType") == "AWS_PROXY"
+            ):
                 return integ
     return None
 
@@ -493,6 +472,7 @@ def _get_account_id(session: boto3.session.Session) -> str:
 
 # --- core CRUD for the edge --------------------------------------------------
 
+
 def attach_route_to_lambda(
     session: boto3.session.Session,
     site: str,
@@ -505,8 +485,8 @@ def attach_route_to_lambda(
 
     Returns a dict with api_id, route_id, integration_id, lambda_arn.
     """
-    apigw = session.client("apigatewayv2",region_name=site.region)
-    lam = session.client("lambda",region_name=site.region)
+    apigw = session.client("apigatewayv2", region_name=site.region)
+    lam = session.client("lambda", region_name=site.region)
 
     api = _find_api_by_name(apigw, site.site_name)
     if not api:
@@ -514,10 +494,12 @@ def attach_route_to_lambda(
 
     api_id = api["ApiId"]
 
-    rk = _route_key_for_endpoint(path,method)
+    rk = _route_key_for_endpoint(path, method)
     route = _find_route_by_key(apigw, api_id, rk)
     if not route:
-        raise ValueError(f"Route {rk!r} does not exist on site {site.site_name!r}. Create the endpoint/route first.")
+        raise ValueError(
+            f"Route {rk!r} does not exist on site {site.site_name!r}. Create the endpoint/route first."
+        )
 
     # Resolve Lambda ARN
     fn = lam.get_function(FunctionName=lambda_function_name)
@@ -589,15 +571,14 @@ def get_route_lambda_attachment(
     - what is that integration uri?
     """
 
-    apigw = session.client("apigatewayv2",region_name=site.region)
-    
+    apigw = session.client("apigatewayv2", region_name=site.region)
+
     api = _find_api_by_name(apigw, site.site_name)
     if not api:
         return None
 
     api_id = api["ApiId"]
-    rk = _route_key_for_endpoint(path,method)
-
+    rk = _route_key_for_endpoint(path, method)
 
     route = _find_route_by_key(apigw, api_id, rk)
     if not route:
@@ -690,12 +671,18 @@ def detach_route_from_lambda(
     # Optional: remove lambda permission
     if remove_lambda_permission:
         if not lambda_function_name_for_permission:
-            raise ValueError("lambda_function_name_for_permission is required when remove_lambda_permission=True")
+            raise ValueError(
+                "lambda_function_name_for_permission is required when remove_lambda_permission=True"
+            )
 
         lam = session.client("lambda", region_name=region)
-        statement_id = f"apigw-{api_id}-{method.lower()}-{path.strip('/').replace('/', '-') or 'root'}"
+        statement_id = (
+            f"apigw-{api_id}-{method.lower()}-{path.strip('/').replace('/', '-') or 'root'}"
+        )
         try:
-            lam.remove_permission(FunctionName=lambda_function_name_for_permission, StatementId=statement_id)
+            lam.remove_permission(
+                FunctionName=lambda_function_name_for_permission, StatementId=statement_id
+            )
         except lam.exceptions.ResourceNotFoundException:
             pass
 

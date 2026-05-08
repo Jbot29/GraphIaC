@@ -14,41 +14,34 @@ class Listener(BaseNode):
         return self.arn
 
     @classmethod
-    def read(self,session,G,g_id,read_id):
+    def read(self, session, G, g_id, read_id):
         print(session)
         read_listener(session, g_id, read_id)
 
         return Listener(
             g_id=g_id,
-            arn=read_id,             # We'll store the entire listener ARN here
+            arn=read_id,  # We'll store the entire listener ARN here
         )
-        
 
-        
+
 def create_listener(session, listener, region="us-east-1"):
-    elb = session.client('elbv2', region_name=region)
+    elb = session.client("elbv2", region_name=region)
     # Step 4: Create a Listener for the Load Balancer
     response = elb.create_listener(
         LoadBalancerArn=listener.lb_arn,
-        Protocol='HTTP',
+        Protocol="HTTP",
         Port=80,
-        DefaultActions=[
-            {
-                'Type': 'forward',
-                'TargetGroupArn': listener.tg_arn
-            }
-        ]
+        DefaultActions=[{"Type": "forward", "TargetGroupArn": listener.tg_arn}],
     )
 
-    listener_arn = response['Listeners'][0]['ListenerArn']
+    listener_arn = response["Listeners"][0]["ListenerArn"]
     print(f"Listener ARN: {listener_arn}")
 
 
-
-def read_listener(session,g_id, listener_arn,region_name = "us-east-1"):
+def read_listener(session, g_id, listener_arn, region_name="us-east-1"):
     """
     Retrieves a single Listener by ARN and populates a Listener Pydantic model.
-    
+
     :param listener_arn: ARN of the listener (e.g., 'arn:aws:elasticloadbalancing:...')
     :param region_name: AWS region.
     :return: A Listener object representing the AWS listener.
@@ -71,7 +64,6 @@ def read_listener(session,g_id, listener_arn,region_name = "us-east-1"):
     return listeners[0]
 
 
-
 """
 # Add nodes
 G.add_node("listener1", type="listener", desc="HTTP:80")
@@ -90,7 +82,7 @@ def create_path_based_rule(
     path_pattern: str,
     target_group_arn: str,
     priority: int,
-    region_name: str = "us-east-1"
+    region_name: str = "us-east-1",
 ) -> str:
     """
     Creates a path-based rule for the given listener ARN.
@@ -103,20 +95,10 @@ def create_path_based_rule(
     response = elbv2.create_rule(
         ListenerArn=listener_arn,
         Priority=priority,  # Must be unique on this listener
-        Conditions=[
-            {
-                "Field": "path-pattern",
-                "Values": [path_pattern]
-            }
-        ],
-        Actions=[
-            {
-                "Type": "forward",
-                "TargetGroupArn": target_group_arn
-            }
-        ]
+        Conditions=[{"Field": "path-pattern", "Values": [path_pattern]}],
+        Actions=[{"Type": "forward", "TargetGroupArn": target_group_arn}],
     )
-    
+
     rule_arn = response["Rules"][0]["RuleArn"]
     print(f"Created rule for path '{path_pattern}' -> TG {target_group_arn} at priority {priority}")
     return rule_arn

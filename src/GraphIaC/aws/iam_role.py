@@ -31,21 +31,21 @@ class IAMRole(BaseNode):
     name: AwsName
     trust_policy: Optional[IamTrustPolicyDocument] = None
     inline_policy: Optional[IamPolicyDocument] = None
-    arn: Optional[str] = None    
+    arn: Optional[str] = None
 
     @property
     def read_id(self) -> Optional[str]:
         return self.name
 
-    def exists(self,session):
+    def exists(self, session):
         print(f"{self.__class__.__name__}: Exists {self}")
-        if role_exists(session,self.name):
+        if role_exists(session, self.name):
             return True
-        return False 
+        return False
 
-    def create(self,session,G):
+    def create(self, session, G):
         print(f"{self.__class__.__name__}: Create {self}")
-        role_arn = role_create(session,self.name,self.trust_policy)
+        role_arn = role_create(session, self.name, self.trust_policy)
 
         if not role_arn:
             return False
@@ -53,28 +53,27 @@ class IAMRole(BaseNode):
         self.arn = role_arn
         return True
 
-
-    def read(self,session,G,g_id,read_id):
-        #cloned = self.copy(deep=True)
-        role_arn,policies = role_read(session,self.name)
+    def read(self, session, G, g_id, read_id):
+        # cloned = self.copy(deep=True)
+        role_arn, policies = role_read(session, self.name)
 
         if not role_arn:
             return None
-        
+
         return IAMRole(g_id=self.g_id, name=self.name, trust_policy=policies, arn=role_arn)
-    
-    def update(self,session,G):
+
+    def update(self, session, G):
         pass
 
-    def delete(self,session,G):
-        delete_iam_role(session,self.name)
+    def delete(self, session, G):
+        delete_iam_role(session, self.name)
 
-    def diff(self,session,G,diff_object):
+    def diff(self, session, G, diff_object):
         return False
-    
+
 
 class IAMRolePolicyEdge(BaseEdge):
-    role_g_id: str 
+    role_g_id: str
     node_g_id: Optional[str] = None
 
     policy_arn: Optional[str] = None
@@ -82,46 +81,46 @@ class IAMRolePolicyEdge(BaseEdge):
     @property
     def policy_name(self) -> str:
         return f"IAMRolePolicyEdge-{self.role_g_id}-{self.node_g_id}"
-    
+
     @property
     def source_g_id(self) -> str:
         return self.role_g_id
-    
+
     @property
     def destination_g_id(self) -> str:
         return self.node_g_id
-    
-    def read(self,session):
+
+    def read(self, session):
         pass
 
-    def create(self,session,G):
+    def create(self, session, G):
         pass
 
-    def update(self,session,G):
+    def update(self, session, G):
         pass
-    def delete(self,session,G):
+
+    def delete(self, session, G):
         pass
+
 
 class IAMRoleInlinePolicyEdge(BaseEdge):
-    role_g_id: str 
-    
+    role_g_id: str
+
     @property
     def policy_name(self) -> str:
         return f"IAMRolePolicyEdge-{self.source_g_id}-{self.destination_g_id}"
-    
+
     @property
     def source_g_id(self):
         return None
-    
+
     @property
     def destination_g_id(self):
         return None
 
 
-
-    
-def role_exists(session,role_name):
-    iam_client = session.client('iam')
+def role_exists(session, role_name):
+    iam_client = session.client("iam")
     try:
         # Check if the role already exists
         iam_client.get_role(RoleName=role_name)
@@ -163,8 +162,8 @@ def role_create(session, role_name, policy_document, wait=True, max_wait_seconds
     return role_arn
 
 
-def role_read(session,role_name):
-    iam_client = session.client('iam')    
+def role_read(session, role_name):
+    iam_client = session.client("iam")
 
     try:
         # Fetch the IAM role details using the role name
@@ -175,29 +174,32 @@ def role_read(session,role_name):
 
         # Fetch the policies attached to this role
         policies_response = iam_client.list_attached_role_policies(RoleName=role_name)
-        policies = {policy["PolicyName"]: policy["PolicyArn"] for policy in policies_response["AttachedPolicies"]}
-        
+        policies = {
+            policy["PolicyName"]: policy["PolicyArn"]
+            for policy in policies_response["AttachedPolicies"]
+        }
+
         # Create an IAMRole instance with the fetched details
-        return role_arn,policies
+        return role_arn, policies
 
     except ClientError as e:
         # Handle error if role doesn't exist or if there's an issue
         print(f"Error: {e}")
-        return None,None
+        return None, None
 
 
-
-def role_has_policy(session,role_name,policy_arn):
-    iam_client = session.client('iam')
+def role_has_policy(session, role_name, policy_arn):
+    iam_client = session.client("iam")
     # List all attached policies for the given role
     response = iam_client.list_attached_role_policies(RoleName=role_name)
-    
+
     # Extract the ARNs of the attached policies
-    attached_policies = [policy['PolicyArn'] for policy in response['AttachedPolicies']]
-    
+    attached_policies = [policy["PolicyArn"] for policy in response["AttachedPolicies"]]
+
     # Check if the given policy ARN is already attached
-    return policy_arn in attached_policies    
-    
+    return policy_arn in attached_policies
+
+
 #
 """
     # Attach a basic execution policy to the role
@@ -211,8 +213,8 @@ def role_has_policy(session,role_name,policy_arn):
 """
 
 
-def delete_iam_role(session,role_name: str):
-    iam = session.client('iam')
+def delete_iam_role(session, role_name: str):
+    iam = session.client("iam")
     # 1. Detach managed policies
     attached = iam.list_attached_role_policies(RoleName=role_name)
     for p in attached.get("AttachedPolicies", []):
@@ -242,13 +244,9 @@ def delete_iam_role(session,role_name: str):
     print("Done.")
 
 
-
-
-
-
-def attach_role_policy(session,role_name: str,policy_arn) -> None:
+def attach_role_policy(session, role_name: str, policy_arn) -> None:
     iam = session.client("iam")
-    
+
     iam.attach_role_policy(
         RoleName=role_name,
         PolicyArn=policy_arn,

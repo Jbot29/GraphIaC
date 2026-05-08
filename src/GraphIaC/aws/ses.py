@@ -52,7 +52,7 @@ class SESDomainIdentity(BaseNode):
             dkim_tokens=dkim_tokens,
             verification_status=resp.get("VerificationStatus"),
         )
- 
+
     def create(self, session, G):
         ses = session.client("sesv2", region_name=self.region)
         resp = ses.create_email_identity(
@@ -79,6 +79,7 @@ class SESDomainRoute53Edge(BaseEdge):
     Wires an SES domain identity to a Route53 hosted zone by creating the
     three DKIM CNAME records that SES requires for domain verification.
     """
+
     ses_g_id: str
     zone_g_id: str
 
@@ -106,7 +107,9 @@ class SESDomainRoute53Edge(BaseEdge):
                 StartRecordType="CNAME",
                 MaxItems="10",
             )
-            found = {r["Name"].rstrip(".") for r in resp["ResourceRecordSets"] if r["Type"] == "CNAME"}
+            found = {
+                r["Name"].rstrip(".") for r in resp["ResourceRecordSets"] if r["Type"] == "CNAME"
+            }
             if expected.issubset(found):
                 return self
         except ClientError as e:
@@ -118,7 +121,9 @@ class SESDomainRoute53Edge(BaseEdge):
         zone_node = G.nodes[self.zone_g_id]["data"]
 
         if not ses_node.dkim_tokens:
-            raise ValueError(f"SESDomainIdentity {self.ses_g_id} has no DKIM tokens — was it created?")
+            raise ValueError(
+                f"SESDomainIdentity {self.ses_g_id} has no DKIM tokens — was it created?"
+            )
 
         zone_id = zone_node.zone_id
         if not zone_id:
@@ -185,6 +190,7 @@ class LambdaSESEdge(IAMRoleInlinePolicyEdge):
     Grants a Lambda's execution role permission to send email via SES
     from the given domain identity.
     """
+
     role_g_id: str
     lambda_node_g_id: str
     ses_node_g_id: str

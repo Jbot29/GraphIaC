@@ -1,5 +1,8 @@
 # GraphIaC
 
+> **Early Alpha — Experimental Software**
+> GraphIaC is in early alpha. APIs will change, features are incomplete, and it has not been tested in production. Use at your own risk.
+
 A graph-based Infrastructure-as-Code framework for AWS. Model your cloud infrastructure as a directed graph — **nodes are AWS resources, edges are the connections and permissions between them**.
 
 ## The Problem
@@ -116,3 +119,7 @@ AWS_PROFILE=your-profile pytest tests/aws/test_dynamodb.py -v
 ```
 
 **Skip AWS tests** (e.g. in CI without credentials) — omit `AWS_PROFILE` or unset it. Any test that needs AWS will be skipped automatically.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

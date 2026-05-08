@@ -7,14 +7,13 @@ class IamPolicyStatement(BaseModel):
     Sid: str
     Effect: Literal["Allow", "Deny"] = "Allow"
     Action: List[str] | str
-    Resource: List[str] | str | None = None   # <-- optional now
-    Condition: dict[str, Any] | None = None    
+    Resource: List[str] | str | None = None  # <-- optional now
+    Condition: dict[str, Any] | None = None
+
 
 class IamPolicyDocument(BaseModel):
     Version: str = "2012-10-17"
     Statement: List[IamPolicyStatement] = []
-
-
 
 
 def put_inline_policy_for_role(
@@ -68,6 +67,7 @@ def statements_equal(a: IamPolicyStatement, b: IamPolicyStatement) -> bool:
 
 
 # ---------- UPDATED: upsert with diff ---------- #
+
 
 def upsert_statement_for_role(
     session,
@@ -151,6 +151,7 @@ def delete_statement_for_role(
 
 # ---------- TRUST POLICY MODELS ---------- #
 
+
 class IamTrustPolicyStatement(BaseModel):
     Sid: str | None = None
     Effect: Literal["Allow", "Deny"] = "Allow"
@@ -165,6 +166,7 @@ class IamTrustPolicyDocument(BaseModel):
 
 
 # ---------- BASIC READ / WRITE HELPERS ---------- #
+
 
 def get_trust_policy_for_role(
     session,
@@ -199,6 +201,7 @@ def put_trust_policy_for_role(
 
 
 # ---------- DIFF / UPSERT / DELETE BY Sid ---------- #
+
 
 def trust_statements_equal(
     a: IamTrustPolicyStatement,

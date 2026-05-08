@@ -10,11 +10,11 @@ class ALB(BaseNode):
     name: str
     desc: Optional[str] = ""
     subnets: List[str]
-    #sg_id: str
+    # sg_id: str
     arn: Optional[str] = None
     region: str = "us-east-1"
 
-    def create(self,session,G):
+    def create(self, session, G):
         return True
 
     @property
@@ -22,34 +22,30 @@ class ALB(BaseNode):
         return self.name
 
     @classmethod
-    def read(self,session,G,g_id,read_id):
-        lb = read_alb(session,read_id,region_name=self.region)
+    def read(self, session, G, g_id, read_id):
+        lb = read_alb(session, read_id, region_name=self.region)
         # Collect subnets from the 'AvailabilityZones' list
         subnets = [az["SubnetId"] for az in lb.get("AvailabilityZones", [])]
-    
+
         return ALB(
             g_id=g_id,
             # "LoadBalancerName" from the AWS response
             name=lb["LoadBalancerName"],
-            
-            #scheme=lb["Scheme"],
-            #type=lb["Type"],
-            #ip_address_type=lb["IpAddressType"],
+            # scheme=lb["Scheme"],
+            # type=lb["Type"],
+            # ip_address_type=lb["IpAddressType"],
             subnets=subnets,
-            #security_groups=security_groups,
+            # security_groups=security_groups,
             arn=lb["LoadBalancerArn"],
-            #dns_name=lb["DNSName"],
-            #canonical_hosted_zone_id=lb["CanonicalHostedZoneId"],
-            #created_time=lb["CreatedTime"],  # Boto3 returns a datetime object
-            #vpc_id=lb["VpcId"],
-            #state=lb["State"]["Code"] if lb.get("State") else None,
+            # dns_name=lb["DNSName"],
+            # canonical_hosted_zone_id=lb["CanonicalHostedZoneId"],
+            # created_time=lb["CreatedTime"],  # Boto3 returns a datetime object
+            # vpc_id=lb["VpcId"],
+            # state=lb["State"]["Code"] if lb.get("State") else None,
         )
-        
 
-
-    def update(self,session,G):
+    def update(self, session, G):
         return True
-
 
 
 """
@@ -74,27 +70,21 @@ class ALB(BaseNode):
 
 """
 
+
 def create_alb(session, alb, region="us-east-1"):
-    elb = session.client('elbv2', region_name=region)
+    elb = session.client("elbv2", region_name=region)
     response = elb.create_load_balancer(
         Name=alb.id,
         Subnets=alb.subnets,
         SecurityGroups=[alb.sg_id],
-        Scheme='internet-facing',
-        Tags=[
-        {
-            'Key': 'Name',
-            'Value': 'my-alb'
-        }
-        ],
-        Type='application',
-        IpAddressType='ipv4'
+        Scheme="internet-facing",
+        Tags=[{"Key": "Name", "Value": "my-alb"}],
+        Type="application",
+        IpAddressType="ipv4",
     )
 
-    load_balancer_arn = response['LoadBalancers'][0]['LoadBalancerArn']
+    load_balancer_arn = response["LoadBalancers"][0]["LoadBalancerArn"]
     print(f"ALB ARN: {load_balancer_arn}")
-
-
 
 
 def create_alb_for_lambda(
@@ -103,7 +93,7 @@ def create_alb_for_lambda(
     security_groups: list[str],
     lambda_arn: str,
     vpc_id: str,
-    region_name: str = "us-east-1"
+    region_name: str = "us-east-1",
 ):
     """
     Creates an internet-facing Application Load Balancer in the specified subnets,
@@ -130,7 +120,7 @@ def create_alb_for_lambda(
         SecurityGroups=security_groups,
         Scheme="internet-facing",  # or 'internal' for private
         IpAddressType="ipv4",
-        Type="application"
+        Type="application",
     )
     load_balancer_arn = lb_response["LoadBalancers"][0]["LoadBalancerArn"]
     print(f"Created ALB ARN: {load_balancer_arn}")
@@ -147,7 +137,7 @@ def create_alb_for_lambda(
         # but they won't be used in the same way as instance targets.
         Protocol="HTTP",
         Port=80,
-        VpcId=vpc_id
+        VpcId=vpc_id,
     )
     target_group_arn = tg_response["TargetGroups"][0]["TargetGroupArn"]
     print(f"Created Target Group ARN: {target_group_arn}")
@@ -156,10 +146,7 @@ def create_alb_for_lambda(
     # 3) Register the Lambda as a target
     # ---------------------------------------------
     print("Registering Lambda function as target...")
-    elbv2.register_targets(
-        TargetGroupArn=target_group_arn,
-        Targets=[{"Id": lambda_arn}]
-    )
+    elbv2.register_targets(TargetGroupArn=target_group_arn, Targets=[{"Id": lambda_arn}])
     print("Lambda successfully registered with target group.")
 
     # ---------------------------------------------
@@ -170,12 +157,7 @@ def create_alb_for_lambda(
         LoadBalancerArn=load_balancer_arn,
         Protocol="HTTP",
         Port=80,
-        DefaultActions=[
-            {
-                "Type": "forward",
-                "TargetGroupArn": target_group_arn
-            }
-        ]
+        DefaultActions=[{"Type": "forward", "TargetGroupArn": target_group_arn}],
     )
     listener_arn = listener_response["Listeners"][0]["ListenerArn"]
     print(f"Created Listener ARN: {listener_arn}")
@@ -198,7 +180,7 @@ def create_alb_for_lambda(
             StatementId=statement_id,
             Action="lambda:InvokeFunction",
             Principal="elasticloadbalancing.amazonaws.com",
-            SourceArn=target_group_arn
+            SourceArn=target_group_arn,
         )
         print("Successfully added permission to Lambda.")
     except lambda_client.exceptions.ResourceConflictException:
@@ -207,15 +189,16 @@ def create_alb_for_lambda(
     return {
         "LoadBalancerArn": load_balancer_arn,
         "TargetGroupArn": target_group_arn,
-        "ListenerArn": listener_arn
+        "ListenerArn": listener_arn,
     }
+
 
 # ---------------------------------------------------------
 # Usage Example
 # ---------------------------------------------------------
 
-    # You'll need your own AWS credentials or a profile set up
-    # Possibly: session = boto3.Session(profile_name="myProfile")
+# You'll need your own AWS credentials or a profile set up
+# Possibly: session = boto3.Session(profile_name="myProfile")
 
 #    load_balancer_name = "my-lambda-alb"
 #    subnets = ["subnet-abc123456", "subnet-def789012"]   # At least two subnets in different AZs
@@ -233,10 +216,10 @@ def create_alb_for_lambda(
 #    )
 
 
-def read_alb(session,alb_name,region_name="us-east-1"):
+def read_alb(session, alb_name, region_name="us-east-1"):
     """
     Reads an ALB configuration from AWS and returns an ApplicationLoadBalancer model.
-    
+
     :param alb_identifier: The ALB name or ARN. If it starts with 'arn:aws:',
                           we'll assume it's an ARN; otherwise, it's treated as a name.
     :param region_name: AWS region where the ALB resides.
@@ -261,8 +244,7 @@ def read_alb(session,alb_name,region_name="us-east-1"):
         raise RuntimeError(f"No ALB found with identifier: {alb_name}")
     if len(load_balancers) > 1:
         raise RuntimeError(
-            f"Multiple ALBs returned for identifier '{alb_name}', "
-            f"please be more specific."
+            f"Multiple ALBs returned for identifier '{alb_name}', please be more specific."
         )
 
     # We have exactly one load balancer

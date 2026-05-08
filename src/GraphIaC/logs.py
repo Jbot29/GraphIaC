@@ -1,4 +1,3 @@
-
 import logging
 
 import colorlog
@@ -18,23 +17,23 @@ def setup_logger(level=logging.INFO):
             "%(blue)s%(name)s: %(reset)s%(message_log_color)s%(message)s",
             reset=True,
             log_colors={
-                "DEBUG":    "cyan",
-                "INFO":     "bold_white",
-                "PLAN":     "bold_green",
-                "WARNING":  "bold_yellow",
-                "ERROR":    "bold_red",
+                "DEBUG": "cyan",
+                "INFO": "bold_white",
+                "PLAN": "bold_green",
+                "WARNING": "bold_yellow",
+                "ERROR": "bold_red",
                 "CRITICAL": "bg_red",
             },
             secondary_log_colors={
                 "message": {
-                    "DEBUG":    "cyan",
-                    "INFO":     "white",
-                    "WARNING":  "yellow",
-                    "ERROR":    "red",
+                    "DEBUG": "cyan",
+                    "INFO": "white",
+                    "WARNING": "yellow",
+                    "ERROR": "red",
                     "CRITICAL": "red",
                 }
             },
-            style="%"
+            style="%",
         )
 
         handler.setFormatter(formatter)
@@ -51,5 +50,3 @@ def setup_logger(level=logging.INFO):
         logging.Logger.plan = plan
 
     return logger
-
-
