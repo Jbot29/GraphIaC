@@ -1,17 +1,12 @@
 import json
 from typing import List, Optional
 
-
 from pydantic import BaseModel
 
-from gbase import GBase
+from GraphIaC.models import BaseNode
 
 
-
-class CacheBehavior(DefaultCacheBehavior):
-    PathPattern: str
-
-class CloudfrontDistribution(GBase):
+class CloudfrontDistribution(BaseNode):
     distribution_id: str
     arn: str
     
@@ -19,12 +14,12 @@ class CloudfrontDistribution(GBase):
         cloudfront_client = session.client('cloudfront')
         try:
             # Retrieve the distribution configuration and metadata
-            response = cloudfront_client.get_distribution(
-                Id=distribution_id
+            cloudfront_client.get_distribution(
+                Id=self.distribution_id
             )
         except cloudfront_client.exceptions.NoSuchDistribution:
-            print(f"Distribution with ID '{distribution_id}' does not exist.")
-            return False        
+            print(f"Distribution with ID '{self.distribution_id}' does not exist.")
+            return False
 
         return True
 
@@ -64,7 +59,8 @@ class CloudfrontDistribution(GBase):
     def delete(self,session,G):
         pass
 
-def create_oac():
+def create_oac(session, bucket_name):
+    cloudfront_client = session.client('cloudfront')
     # Step 1: Create an Origin Access Control (OAC)
     response_oac = cloudfront_client.create_origin_access_control(
         OriginAccessControlConfig={
@@ -75,12 +71,13 @@ def create_oac():
             'OriginAccessControlOriginType': 's3'
         }
     )
-    oac_id = response_oac['OriginAccessControl']['Id']
+    return response_oac['OriginAccessControl']['Id']
 
-    
-def create_distribution():
+
+def create_distribution(session, bucket_name, custom_domain, oac_id, certificate_arn, distribution_comment):
+    cloudfront_client = session.client('cloudfront')
     # Step 2: Create the CloudFront distribution
-    response_distribution = cloudfront_client.create_distribution(
+    cloudfront_client.create_distribution(
         DistributionConfig={
             'CallerReference': 'unique-string-for-distribution',
             'Aliases': {
@@ -200,6 +197,9 @@ class DefaultCacheBehavior(BaseModel):
     TrustedSigners: Optional[TrustedSigners] = None
     TrustedKeyGroups: Optional[TrustedKeyGroups] = None
 
+
+class CacheBehavior(DefaultCacheBehavior):
+    PathPattern: str
 
 
 class CacheBehaviors(BaseModel):

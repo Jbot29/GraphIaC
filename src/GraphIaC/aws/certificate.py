@@ -136,7 +136,7 @@ def get_dns_validation(session,certificate_arn, domain_name,hosted_zone_id):
 def is_cert_valid(session,certificate_arn):
     acm = session.client('acm', region_name='us-east-1')    
     response = acm.describe_certificate(CertificateArn=certificate_arn)
-    for option in validation_options:
+    for option in response['Certificate']['DomainValidationOptions']:
             if option['ValidationStatus'] == 'SUCCESS':
                 return True
 

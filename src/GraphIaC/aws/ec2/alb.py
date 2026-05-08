@@ -12,19 +12,18 @@ class ALB(BaseNode):
     subnets: List[str]
     #sg_id: str
     arn: Optional[str] = None
+    region: str = "us-east-1"
 
     def create(self,session,G):
         return True
-    
+
     @property
     def read_id(self) -> Optional[str]:
         return self.name
-    
+
     @classmethod
     def read(self,session,G,g_id,read_id):
-        lb = read_alb(session,read_id,region_name="us-east-1")
-        # Security groups are directly returned
-        security_groups = lb.get("SecurityGroups", [])
+        lb = read_alb(session,read_id,region_name=self.region)
         # Collect subnets from the 'AvailabilityZones' list
         subnets = [az["SubnetId"] for az in lb.get("AvailabilityZones", [])]
     
@@ -75,7 +74,8 @@ class ALB(BaseNode):
 
 """
 
-def create_alb(alb):
+def create_alb(session, alb, region="us-east-1"):
+    elb = session.client('elbv2', region_name=region)
     response = elb.create_load_balancer(
         Name=alb.id,
         Subnets=alb.subnets,

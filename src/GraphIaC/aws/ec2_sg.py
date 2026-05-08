@@ -31,9 +31,8 @@ class SecurityGroup(BaseNode):
     
 
 
-def security_group_read(session,security_group_id):
-    # Initialize a boto3 EC2 client
-    ec2 = session.client('ec2',region_name='us-east-1')
+def security_group_read(session, security_group_id, region="us-east-1"):
+    ec2 = session.client('ec2', region_name=region)
 
     try:
         # Try to describe the security group by ID
@@ -51,7 +50,8 @@ def security_group_read(session,security_group_id):
     return False, None
 
 
-def create_sg():
+def create_sg(session, docbot_sg, region="us-east-1"):
+    ec2 = session.client('ec2', region_name=region)
     response = ec2.create_security_group(
         GroupName=docbot_sg.id,
         Description=docbot_sg.desc,
@@ -65,8 +65,8 @@ def create_sg():
     print(security_group_id )
 
 
-def sg_ingress(security_group_id):
-
+def sg_ingress(session, security_group_id, region="us-east-1"):
+    ec2 = session.client('ec2', region_name=region)
     # Authorize inbound traffic (e.g., allow HTTP on port 80)
     response = ec2.authorize_security_group_ingress(
         GroupId=security_group_id,

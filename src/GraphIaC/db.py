@@ -4,18 +4,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-#load from db
-#dog = Dog.model_validate(from_json(partial_dog_json, allow_partial=True))
-"""
-model_from_json = MyModel.parse_raw(retrieved_json)
-print("Model from JSON (using parse_raw):", model_from_json)
-
-# Method 2: Using `parse_obj` if you load JSON into a Python dictionary first
-model_dict = json.loads(retrieved_json)
-model_from_dict = MyModel.parse_obj(model_dict)
-print("Model from JSON (using parse_obj):", model_from_dict)
-
-"""
 from .logs import setup_logger
 
 logger = setup_logger()
@@ -178,7 +166,7 @@ def db_create_edge(conn,source_name, destination_name, edge,weight=1):
         pass
 
 
-def name_exists(name):
+def name_exists(conn, name):
     # Connect to the SQLite database
     #conn = sqlite3.connect("example.db")
     cursor = conn.cursor()

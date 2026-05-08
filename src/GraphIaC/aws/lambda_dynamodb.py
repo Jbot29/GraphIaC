@@ -8,6 +8,7 @@ from .iam_policy import (
 )
 from .iam_role import IAMRoleInlinePolicyEdge
 
+
 class LambdaDynamoEdge(IAMRoleInlinePolicyEdge):
     role_g_id: str 
     lambda_node_g_id: str
@@ -52,7 +53,7 @@ class LambdaDynamoEdge(IAMRoleInlinePolicyEdge):
         
 
         
-        result = put_inline_policy_for_role(session,role_name,self.policy_name,self.policy_doc)
+        put_inline_policy_for_role(session,role_name,self.policy_name,self.policy_doc)
         return True
         
 

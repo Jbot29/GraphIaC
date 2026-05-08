@@ -124,9 +124,8 @@ def role_exists(session,role_name):
     iam_client = session.client('iam')
     try:
         # Check if the role already exists
-        role_response = iam_client.get_role(RoleName=role_name)
+        iam_client.get_role(RoleName=role_name)
         print(f"Role '{role_name}' already exists.")
-        role_arn = role_response['Role']['Arn']
     except iam_client.exceptions.NoSuchEntityException:
         return False
 
