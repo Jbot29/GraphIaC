@@ -1,199 +1,181 @@
-import time
-from typing import List
+from typing import Optional
 
-import boto3
 from botocore.exceptions import ClientError
-from pydantic import BaseModel
+
+from GraphIaC.models import BaseEdge, BaseNode
+
+from ..logs import setup_logger
+
+logger = setup_logger()
 
 
-class CertificateHostedZoneEdge(BaseModel):
-    hz_g_id: str
-    cert_g_id: str
-    changes: List[str]
+class ACMCertificate(BaseNode):
+    domain_name: str
+    arn: Optional[str] = None
+    status: Optional[str] = None  # PENDING_VALIDATION, ISSUED, FAILED, EXPIRED, etc.
+
+    @property
+    def read_id(self) -> Optional[str]:
+        # Prefer ARN for direct lookup; fall back to domain name search
+        return self.arn if self.arn else self.domain_name
 
     @classmethod
-    def generate(cls, hosted_zone, cert):
-        return CertificateHostedZoneEdge(hz_g_id=hosted_zone.g_id, cert_g_id=cert.g_id, changes=[])
-
-
-class Certificate(BaseModel):
-    g_id: str
-    domain_name: str
-    hosted_zone_id: str
-    # arn: Optional[str] = None
-    arn: str
-
-    def exists(self, session):
-        print(f"{self.__class__.__name__}: Exists {self}")
-
-        if self.arn and check_certificate_exists_by_arn(session, self.arn):
-            return True
-
-        return False
-
-    def create(self, session, G):
-        print(f"{self.__class__.__name__}: Create {self}")
-        hosted_zone = None
-
-        for e in G.neighbors(self.g_id):
-            print(f"\tEdge: {e}")
-            edge = G.edges[self.g_id, e]
-            edge_node = G.nodes[e]["data"]
-            print(f"\t{edge} {edge_node} {edge_node.__class__.__name__}")
-
-            if edge_node.__class__.__name__ == "HostedZone":
-                hosted_zone = edge_node
-
-        # create cert
-        print(f"Create cert for  Zone: {hosted_zone}")
-        # request_certificate(session,hosted_zone.domain_name, hosted_zone.zone_id)
-        add_dns_validation(session, self.arn, hosted_zone.domain_name, hosted_zone.zone_id)
-
-
-def check_certificate_exists_by_arn(session, certificate_arn):
-    # Initialize the ACM client
-    acm = session.client("acm", region_name="us-east-1")  # Ensure this is the correct region
-
-    try:
-        # Describe the certificate by ARN
-        response = acm.describe_certificate(CertificateArn=certificate_arn)
-
-        # If the call is successful, the certificate exists
-        print(f"Certificate found: {response['Certificate']}")
-        return True
-
-    except ClientError as e:
-        # If the certificate does not exist, catch the exception
-        if e.response["Error"]["Code"] == "ResourceNotFoundException":
-            print(f"Certificate with ARN {certificate_arn} does not exist.")
-        else:
-            print(f"An error occurred: {e}")
-        return False
-
-
-def request_certificate(session, domain_name, hosted_zone_id):
-    # Initialize the ACM client for certificate requests
-    print(f"Create cert for  Zone: {domain_name} {hosted_zone_id}")
-
-    acm = session.client(
-        "acm", region_name="us-east-1"
-    )  # Certificates for CloudFront must be in us-east-1
-
-    try:
-        # Request the certificate with DNS validation
-        response = acm.request_certificate(
-            DomainName=domain_name,
-            ValidationMethod="DNS",
-            SubjectAlternativeNames=[f"www.{domain_name}"],
-            Tags=[{"Key": "Name", "Value": f"{domain_name} Certificate"}],
-        )
-        certificate_arn = response["CertificateArn"]
-        print(f"Certificate requested for {domain_name}. ARN: {certificate_arn}")
-        return certificate_arn
-
-    except ClientError as e:
-        print(f"Failed to request certificate: {e}")
-        return None
-
-
-def get_dns_validation(session, certificate_arn, domain_name, hosted_zone_id):
-    edge_changes = []
-    acm = session.client("acm", region_name="us-east-1")
-    try:
-        # Get the DNS validation records from ACM
-        response = acm.describe_certificate(CertificateArn=certificate_arn)
-        validation_options = response["Certificate"]["DomainValidationOptions"]
-
-        for option in validation_options:
-            dns_record = option["ResourceRecord"]
-
-            change_batch = {
-                "Changes": [
-                    {
-                        "Action": "UPSERT",
-                        "ResourceRecordSet": {
-                            "Name": dns_record["Name"],
-                            "Type": dns_record["Type"],
-                            "TTL": 300,
-                            "ResourceRecords": [{"Value": dns_record["Value"]}],
-                        },
-                    }
-                ]
-            }
-
-            edge_changes.append(change_batch)
-    except ClientError as e:
-        print(f"Failed to get DNS validation record: {e}")
-    return edge_changes
-
-
-def is_cert_valid(session, certificate_arn):
-    acm = session.client("acm", region_name="us-east-1")
-    response = acm.describe_certificate(CertificateArn=certificate_arn)
-    for option in response["Certificate"]["DomainValidationOptions"]:
-        if option["ValidationStatus"] == "SUCCESS":
-            return True
-
-    return False
-
-
-def add_dns_validation(session, certificate_arn, domain_name, hosted_zone_id):
-    # Initialize ACM and Route 53 clients
-    acm = session.client("acm", region_name="us-east-1")
-    route53 = session.client("route53")
-    print(f"Create dns validation for  Zone: {certificate_arn} {domain_name} {hosted_zone_id}")
-
-    try:
-        # Get the DNS validation records from ACM
-        response = acm.describe_certificate(CertificateArn=certificate_arn)
-        validation_options = response["Certificate"]["DomainValidationOptions"]
-
-        edge_changes = []
-        # Loop through each validation option and add a record to Route 53
-        for option in validation_options:
-            if option["ValidationStatus"] != "SUCCESS":
-                dns_record = option["ResourceRecord"]
-
-                # Add DNS record to Route 53
-                change_batch = {
-                    "Changes": [
-                        {
-                            "Action": "UPSERT",
-                            "ResourceRecordSet": {
-                                "Name": dns_record["Name"],
-                                "Type": dns_record["Type"],
-                                "TTL": 300,
-                                "ResourceRecords": [{"Value": dns_record["Value"]}],
-                            },
-                        }
-                    ]
-                }
-
-                route53.change_resource_record_sets(
-                    HostedZoneId=hosted_zone_id, ChangeBatch=change_batch
+    def read(cls, session, G, g_id, read_id, **kwargs):
+        acm = session.client("acm", region_name="us-east-1")
+        try:
+            if read_id and read_id.startswith("arn:"):
+                resp = acm.describe_certificate(CertificateArn=read_id)
+                cert = resp["Certificate"]
+                return cls(
+                    g_id=g_id,
+                    domain_name=cert["DomainName"],
+                    arn=cert["CertificateArn"],
+                    status=cert["Status"],
                 )
 
-                edge_changes.append(change_batch)
-                print(f"Added DNS validation record for {domain_name}: {dns_record}")
+            # Search by domain name
+            paginator = acm.get_paginator("list_certificates")
+            for page in paginator.paginate():
+                for summary in page["CertificateSummaryList"]:
+                    if summary["DomainName"] == read_id:
+                        resp = acm.describe_certificate(CertificateArn=summary["CertificateArn"])
+                        cert = resp["Certificate"]
+                        return cls(
+                            g_id=g_id,
+                            domain_name=cert["DomainName"],
+                            arn=cert["CertificateArn"],
+                            status=cert["Status"],
+                        )
+        except ClientError as e:
+            logger.error(f"Error reading ACM certificate {read_id}: {e}")
+        return None
 
-    except ClientError as e:
-        print(f"Failed to add DNS validation record: {e}")
+    def create(self, session, G):
+        acm = session.client("acm", region_name="us-east-1")
+        try:
+            resp = acm.request_certificate(
+                DomainName=self.domain_name,
+                ValidationMethod="DNS",
+                SubjectAlternativeNames=[f"www.{self.domain_name}"],
+                Tags=[{"Key": "Name", "Value": f"{self.domain_name} Certificate"}],
+            )
+            self.arn = resp["CertificateArn"]
+            self.status = "PENDING_VALIDATION"
+            logger.info(f"ACM certificate requested for {self.domain_name}: {self.arn}")
+        except ClientError as e:
+            logger.error(f"Failed to request certificate for {self.domain_name}: {e}")
+            raise
+
+    def update(self, session, G, diff=None):
+        pass  # ACM cert properties are immutable; status is read-only from AWS
+
+    def delete(self, session, G):
+        if not self.arn:
+            return
+        acm = session.client("acm", region_name="us-east-1")
+        try:
+            acm.delete_certificate(CertificateArn=self.arn)
+            logger.info(f"Deleted ACM certificate {self.arn}")
+        except ClientError as e:
+            logger.error(f"Failed to delete certificate {self.arn}: {e}")
+            raise
 
 
-def check_certificate_status(certificate_arn):
-    # Initialize the ACM client
-    acm = boto3.client("acm", region_name="us-east-1")
+class ACMCertificateHostedZoneEdge(BaseEdge):
+    """
+    Wires an ACMCertificate to a HostedZone by creating the DNS CNAME validation
+    records in Route53. ACM requires these records to prove domain ownership before
+    issuing the certificate.
+    """
 
-    # Check the certificate status in a loop
-    while True:
-        response = acm.describe_certificate(CertificateArn=certificate_arn)
-        status = response["Certificate"]["Status"]
-        print(f"Certificate status: {status}")
+    cert_g_id: str
+    hz_g_id: str
 
-        if status == "ISSUED":
-            print("Certificate has been successfully issued.")
-            break
-        elif status == "FAILED":
-            print("Certificate issuance failed.")
-            break
-        time.sleep(30)  # Wait and recheck status every 30 seconds
+    @property
+    def source_g_id(self):
+        return self.cert_g_id
+
+    @property
+    def destination_g_id(self):
+        return self.hz_g_id
+
+    def read(self, session, G=None):
+        if G is None:
+            return None
+        cert = G.nodes[self.cert_g_id]["data"]
+        hz = G.nodes[self.hz_g_id]["data"]
+        if not cert.arn or not hz.zone_id:
+            return None
+
+        # Check whether the validation CNAME records already exist in Route53
+        route53 = session.client("route53")
+        acm = session.client("acm", region_name="us-east-1")
+        try:
+            resp = acm.describe_certificate(CertificateArn=cert.arn)
+            for option in resp["Certificate"].get("DomainValidationOptions", []):
+                if "ResourceRecord" not in option:
+                    return None
+                record = option["ResourceRecord"]
+                existing = route53.list_resource_record_sets(
+                    HostedZoneId=hz.zone_id,
+                    StartRecordName=record["Name"],
+                    StartRecordType=record["Type"],
+                    MaxItems="1",
+                )
+                sets = existing.get("ResourceRecordSets", [])
+                if not sets or sets[0]["Name"].rstrip(".") != record["Name"].rstrip("."):
+                    return None
+            return self  # all validation records are present
+        except ClientError as e:
+            logger.error(f"Error checking DNS validation records: {e}")
+        return None
+
+    def create(self, session, G):
+        cert = G.nodes[self.cert_g_id]["data"]
+        hz = G.nodes[self.hz_g_id]["data"]
+
+        if not cert.arn:
+            logger.warning("Certificate ARN not yet available; skipping DNS validation setup")
+            return
+
+        acm = session.client("acm", region_name="us-east-1")
+        route53 = session.client("route53")
+        try:
+            resp = acm.describe_certificate(CertificateArn=cert.arn)
+            for option in resp["Certificate"].get("DomainValidationOptions", []):
+                if option.get("ValidationStatus") == "SUCCESS":
+                    continue
+                if "ResourceRecord" not in option:
+                    logger.warning(
+                        f"DNS validation record not yet available for {option['DomainName']}; "
+                        "re-run after ACM propagates the record"
+                    )
+                    continue
+                dns_record = option["ResourceRecord"]
+                route53.change_resource_record_sets(
+                    HostedZoneId=hz.zone_id,
+                    ChangeBatch={
+                        "Changes": [
+                            {
+                                "Action": "UPSERT",
+                                "ResourceRecordSet": {
+                                    "Name": dns_record["Name"],
+                                    "Type": dns_record["Type"],
+                                    "TTL": 300,
+                                    "ResourceRecords": [{"Value": dns_record["Value"]}],
+                                },
+                            }
+                        ]
+                    },
+                )
+                logger.info(f"Added DNS validation CNAME for {option['DomainName']}")
+        except ClientError as e:
+            logger.error(f"Failed to add DNS validation records: {e}")
+            raise
+
+    def update(self, session, G, diff=None):
+        pass
+
+    def delete(self, session, G):
+        # Validation CNAMEs are harmless to leave in place and ACM reuses them on renewal.
+        pass

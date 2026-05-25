@@ -27,6 +27,12 @@ A secondary benefit: because the infrastructure is a graph, you can render it as
 ## Install
 
 ```bash
+pip install GraphIaC
+```
+
+**For development (editable install with test dependencies):**
+
+```bash
 pip install -e ".[dev]"
 ```
 

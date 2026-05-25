@@ -4,3 +4,8 @@ pydantic
 colorlog
 deepdiff
 pytz
+
+[dev]
+pytest
+ruff
+moto[all]

@@ -1,6 +1,6 @@
 [project]
 name = "GraphIaC"
-version = "0.0.1"
+version = "0.0.2"
 authors = [
   { name="Jeremy Schwartz", email="jerschwartz@gmail.com" },
 ]
@@ -29,8 +29,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/pypa/sampleproject"
-Issues = "https://github.com/pypa/sampleproject/issues"
+Homepage = "https://github.com/Jbot29/GraphIaC"
+Issues = "https://github.com/Jbot29/GraphIaC/issues"
 
 [build-system]
 requires = ["setuptools>=61.0"]

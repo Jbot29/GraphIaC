@@ -1,12 +1,17 @@
 from GraphIaC.aws.apigateway import ApiEndpoint, ApiSite
-from GraphIaC.aws.certificate import Certificate, CertificateHostedZoneEdge
+from GraphIaC.aws.certificate import ACMCertificate, ACMCertificateHostedZoneEdge
+from GraphIaC.aws.cloudfront import (
+    CloudFrontDistribution,
+    CloudFrontRoute53Edge,
+    CloudFrontS3OACEdge,
+)
 from GraphIaC.aws.dynamodb import DynamoTable
 from GraphIaC.aws.ec2.alb import ALB
 from GraphIaC.aws.ec2.listener import Listener
 from GraphIaC.aws.ec2_sg import SecurityGroup
 from GraphIaC.aws.iam_role import IAMRole
 from GraphIaC.aws.lambda_func import LambdaZipFile
-from GraphIaC.aws.route53 import HostedZone
+from GraphIaC.aws.route53 import HostedZone, Route53AliasRecord
 from GraphIaC.aws.s3 import S3Bucket
 from GraphIaC.aws.ses import LambdaSESEdge, SESDomainIdentity, SESDomainRoute53Edge
 
@@ -15,9 +20,13 @@ from GraphIaC.aws.ses import LambdaSESEdge, SESDomainIdentity, SESDomainRoute53E
 
 BASE_MODEL_MAP = {
     "HostedZone": HostedZone,
-    "Certificate": Certificate,
-    "CertificateHostedZoneEdge": CertificateHostedZoneEdge,
+    "Route53AliasRecord": Route53AliasRecord,
+    "ACMCertificate": ACMCertificate,
+    "ACMCertificateHostedZoneEdge": ACMCertificateHostedZoneEdge,
     "S3Bucket": S3Bucket,
+    "CloudFrontDistribution": CloudFrontDistribution,
+    "CloudFrontS3OACEdge": CloudFrontS3OACEdge,
+    "CloudFrontRoute53Edge": CloudFrontRoute53Edge,
     "IAMRole": IAMRole,
     "LambdaZipFile": LambdaZipFile,
     "SecurityGroup": SecurityGroup,

@@ -39,6 +39,13 @@ pytest tests/aws/test_dynamodb.py   # requires AWS credentials
 ./freeze.sh  # pip freeze > requirements.txt
 ```
 
+**Publish to PyPI:**
+```bash
+python3 -m build
+twine upload dist/*
+```
+Bump `version` in `pyproject.toml` before each publish. Package is live at `pip install GraphIaC`.
+
 ## Architecture
 
 ### Core Engine (`src/GraphIaC/main.py`)
@@ -79,6 +86,40 @@ Examples of the edge pattern:
 - `IAMRolePolicyLambdaEdge` — attaches `AWSLambdaBasicExecutionRole` when a Lambda node connects to an IAM role
 - `EndpointLambdaEdge` — wires an API Gateway route to a Lambda integration + grants invoke permission
 - `SiteEndpointEdge` — connects an API Gateway HTTP API to a route
+- `ACMCertificateHostedZoneEdge` — adds Route53 CNAME validation records so ACM can issue the cert
+- `CloudFrontS3OACEdge` — sets an S3 bucket policy allowing only a specific CloudFront distribution (OAC pattern)
+- `CloudFrontRoute53Edge` — creates a Route53 A alias record pointing a domain at a CloudFront distribution; reads the CF domain name from the graph at `create()` time so it works in the same run as CF creation
+
+Current node inventory by service:
+- **ACM** (`certificate.py`): `ACMCertificate`
+- **CloudFront** (`cloudfront.py`): `CloudFrontDistribution`
+- **Route53** (`route53.py`): `HostedZone`, `Route53AliasRecord`
+- **S3** (`s3.py`): `S3Bucket`
+- **IAM** (`iam_role.py`, `iam_policy.py`): `IAMRole`
+- **Lambda** (`lambda_func.py`): `LambdaZipFile`
+- **DynamoDB** (`dynamodb.py`): `DynamoTable`
+- **API Gateway** (`apigateway.py`): `ApiSite`, `ApiEndpoint`
+- **SES** (`ses.py`): `SESDomainIdentity`
+
+### Two-Phase Pattern for Long-Running Resources
+
+Some AWS resources take hours to provision (ACM certificate validation is the main case). The correct pattern is **conditional graph building** based on live resource state — not framework-level waiting or retries:
+
+```python
+def infra(state):
+    # Phase 1: always add the slow resource
+    cert = ACMCertificate(g_id="cert", domain_name="example.com")
+    GraphIaC.add_node(state, cert)
+
+    # Phase 2: check live state; skip downstream until ready
+    live_cert = ACMCertificate.read(state.session, state.G, "cert", None)
+    if not (live_cert and live_cert.status == "ISSUED"):
+        return
+
+    # downstream resources that depend on the cert...
+```
+
+The `read()` classmethod searches AWS by domain name when no ARN is provided yet (`read_id=None`). Re-run after the resource is ready and the downstream graph gets built automatically.
 
 ### Model Registry (`src/GraphIaC/model_map.py`)
 
@@ -86,7 +127,7 @@ Maps string type names to classes. Required so the DB layer can deserialize stor
 
 ### Logging (`src/GraphIaC/logs.py`)
 
-Shared `colorlog` setup. Import `get_logger(__name__)` in new modules rather than calling `logging` directly.
+Shared `colorlog` setup. Call `setup_logger()` in new modules rather than calling `logging` directly.
 
 ## Adding a New AWS Resource
 
