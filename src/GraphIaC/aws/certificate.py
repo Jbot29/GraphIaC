@@ -21,6 +21,12 @@ class ACMCertificate(BaseNode):
 
     @classmethod
     def read(cls, session, G, g_id, read_id, **kwargs):
+        # When called from infra.py with read_id=None, fall back to domain_name from graph
+        if not read_id and G is not None:
+            node = G.nodes.get(g_id, {}).get("data")
+            if node and hasattr(node, "domain_name"):
+                read_id = node.domain_name
+
         acm = session.client("acm", region_name="us-east-1")
         try:
             if read_id and read_id.startswith("arn:"):

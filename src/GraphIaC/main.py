@@ -13,6 +13,7 @@ from .db import (
     db_create_node,
     db_delete_row,
     db_get_rows_not_in_list,
+    db_update_node,
     get_edge_by_id,
     get_node_by_id,
 )
@@ -28,7 +29,7 @@ class GraphIaCState(BaseModel):
     models_map: dict
 
     class Config:
-        arbitrary_types_allowed = True  # Allow custom types like sqlite3.Connection
+        arbitrary_types_allowed = True
 
     @validator("db_conn")
     def validate_db_conn(cls, v):
@@ -39,7 +40,6 @@ class GraphIaCState(BaseModel):
 
 def init(session, db_conn):
     create_tables(db_conn)
-
     return GraphIaCState(
         session=session, db_conn=db_conn, G=nx.DiGraph(), models_map=BASE_MODEL_MAP
     )
@@ -49,7 +49,6 @@ def add_node(state, node):
     state.G.add_node(node.g_id, data=node)
 
 
-# def add_edge(state,a,b,edge):
 def add_edge(state, edge):
     state.G.add_edge(edge.source_g_id, edge.destination_g_id, data=edge)
 
@@ -69,60 +68,60 @@ class Operation(BaseModel):
 
 def load_model_from_db(state, obj_name, obj_data):
     pm = state.models_map[obj_name]
-
     return pm.model_validate_json(obj_data)
 
 
-def plan(state):
-    """Get all nodes, load from db, diff and plan"""
+def _diff_summary(old, new):
+    """Return a compact human-readable summary of changed fields."""
+    old_d = old.model_dump()
+    new_d = new.model_dump()
+    parts = []
+    for key in new_d:
+        if key == "g_id":
+            continue
+        if old_d.get(key) != new_d[key]:
+            parts.append(f"{key}: {old_d.get(key)!r} → {new_d[key]!r}")
+    return "  " + ", ".join(parts) if parts else ""
 
+
+def plan(state):
     plan_ops = []
     db_nodes_seen = []
+
     for node in state.G.nodes:
         pn = state.G.nodes[node]["data"]
-
-        logger.info(f"Node: {node} PN:{pn}")
+        cls_name = pn.__class__.__name__
 
         current_state = pn.read(state.session, state.G, g_id=pn.g_id, read_id=pn.read_id)
 
         if not current_state:
-            logger.info("Doesn't exist in AWS")
-
-            create_op = Operation(operation=OperationType.CREATE, obj=pn)
-            plan_ops.append(create_op)
+            logger.plan(f"  + {cls_name} [{pn.g_id}]  will be created")
+            plan_ops.append(Operation(operation=OperationType.CREATE, obj=pn))
             continue
 
-        # it exists in aws does it exist in db and is it different
         pn_db_row = get_node_by_id(state.db_conn, pn.g_id)
 
         if not pn_db_row:
-            # add to db
-            create_op = Operation(operation=OperationType.IMPORT, obj=pn)
-            plan_ops.append(create_op)
+            logger.plan(f"  ↳ {cls_name} [{pn.g_id}]  will be imported")
+            plan_ops.append(Operation(operation=OperationType.IMPORT, obj=current_state))
             continue
 
         db_nodes_seen.append(str(pn_db_row[0]))
         pn_last = load_model_from_db(state, pn_db_row[2], pn_db_row[3])
 
-        # diff with saved state
-
-        print("DIFF:")
-        print(pn_last)
-        print(current_state)
         if pn.diff(state.session, state.G, current_state) or pn.diff(
             state.session, state.G, pn_last
         ):
-            logger.info("Update needed")
-            # TODO print a detailed diff
-            update_op = Operation(operation=OperationType.UPDATE, obj=pn)
-            plan_ops.append(update_op)
+            summary = _diff_summary(pn_last, current_state)
+            logger.plan(f"  ~ {cls_name} [{pn.g_id}]  will be updated{summary}")
+            plan_ops.append(Operation(operation=OperationType.UPDATE, obj=current_state))
 
         state.G.nodes[node]["data"] = current_state
 
-    # for node in state.G.nodes:
     for edge in list(state.G.edges(data=True)):
-        logger.info(f"Run EDGE updates: {edge}")
         edge_data = edge[2]["data"]
+        cls_name = edge_data.__class__.__name__
+        label = f"{edge_data.source_g_id} → {edge_data.destination_g_id}"
         edge_id = None
 
         live_edge = edge_data.read(state.session, state.G)
@@ -134,85 +133,88 @@ def plan(state):
             edge_id = get_edge_by_id(state.db_conn, source_id[0], destination_id[0])
 
         if not edge_id or not live_edge:
-            logger.info(f"CREATE EDGE: {edge_data.source_g_id} -> {edge_data.destination_g_id}")
-            create_op = Operation(operation=OperationType.CREATE_EDGE, obj=edge_data)
-            plan_ops.append(create_op)
+            logger.plan(f"  + {cls_name} [{label}]  will be applied")
+            plan_ops.append(Operation(operation=OperationType.CREATE_EDGE, obj=edge_data))
 
-    # check for deleted items
     for orphaned_node in db_get_rows_not_in_list(state.db_conn, "nodes", db_nodes_seen):
-        logger.info(f"ORPHANDED Node: {orphaned_node}")
         on_last = load_model_from_db(state, orphaned_node[2], orphaned_node[3])
-
-        delete_op = Operation(operation=OperationType.DELETE, obj=on_last)
-        plan_ops.append(delete_op)
+        cls_name = on_last.__class__.__name__
+        logger.plan(f"  - {cls_name} [{on_last.g_id}]  will be deleted")
+        plan_ops.append(Operation(operation=OperationType.DELETE, obj=on_last))
 
     return plan_ops
 
 
 def run(state):
+    logger.plan("Planning...")
     changes = plan(state)
 
+    if not changes:
+        logger.info("No changes. Infrastructure is up to date.")
+        return
+
+    counts = {OperationType.CREATE: 0, OperationType.UPDATE: 0,
+              OperationType.DELETE: 0, OperationType.IMPORT: 0,
+              OperationType.CREATE_EDGE: 0}
+
+    logger.plan("Applying...")
     for change in changes:
-        print(change)
+        obj = change.obj
+        cls_name = obj.__class__.__name__
+        counts[change.operation] += 1
 
         if change.operation == OperationType.CREATE:
-            print("CREATE")
-            logger.info(f"Create: {change.obj}")
-            result = change.obj.create(state.session, state.G)
-            print(result)
-            print(change.obj)
-            # need to read crrent version and save that
-            db_create_node(state.db_conn, change.obj)
+            logger.info(f"  + [{obj.g_id}] creating {cls_name}...")
+            obj.create(state.session, state.G)
+            db_create_node(state.db_conn, obj)
 
         elif change.operation == OperationType.IMPORT:
-            # add the obj to the db
-            print(f"IMPORT DB  {change.obj}")
-            db_create_node(state.db_conn, change.obj)
+            logger.info(f"  ↳ [{obj.g_id}] importing {cls_name}")
+            db_create_node(state.db_conn, obj)
+
         elif change.operation == OperationType.UPDATE:
-            print(f"Update: {change.obj}")
-            change.obj.update(state.session, state.G)
+            logger.info(f"  ~ [{obj.g_id}] updating {cls_name}")
+            obj.update(state.session, state.G)
+            db_update_node(state.db_conn, obj)
+
         elif change.operation == OperationType.DELETE:
-            print(f"Delete: {change.obj}")
-            result = change.obj.delete(state.session, state.G)
-            print(result)
-            row_id = get_node_by_id(state.db_conn, change.obj.g_id)
+            logger.info(f"  - [{obj.g_id}] deleting {cls_name}...")
+            obj.delete(state.session, state.G)
+            row_id = get_node_by_id(state.db_conn, obj.g_id)
             db_delete_row(state.db_conn, "nodes", row_id[0])
+
         elif change.operation == OperationType.CREATE_EDGE:
-            print(f"Create EDGE: {change.obj}")
-            result = change.obj.create(state.session, state.G)
-            db_create_edge(
-                state.db_conn, change.obj.source_g_id, change.obj.destination_g_id, change.obj
-            )
+            label = f"{obj.source_g_id} → {obj.destination_g_id}"
+            logger.info(f"  + [{label}] applying {cls_name}...")
+            obj.create(state.session, state.G)
+            db_create_edge(state.db_conn, obj.source_g_id, obj.destination_g_id, obj)
+
+    created = counts[OperationType.CREATE]
+    updated = counts[OperationType.UPDATE]
+    deleted = counts[OperationType.DELETE]
+    imported = counts[OperationType.IMPORT]
+    edges = counts[OperationType.CREATE_EDGE]
+    parts = []
+    if created:
+        parts.append(f"{created} created")
+    if updated:
+        parts.append(f"{updated} updated")
+    if deleted:
+        parts.append(f"{deleted} deleted")
+    if imported:
+        parts.append(f"{imported} imported")
+    if edges:
+        parts.append(f"{edges} edges applied")
+    logger.plan(f"Done. {', '.join(parts)}.")
 
 
 def run_import(state, db_conn, imports):
     for i in imports:
-        print(f"Importing {i}")
+        logger.info(f"Importing {i.g_id}")
         db_create_node(db_conn, i)
 
 
 def export_graph(state, file_name):
-    # https://github.com/daniellawrence/graphviz-aws
-    A = nx.nx_agraph.to_agraph(state.G)  # convert to a graphviz graph
-    A.write(f"{file_name}.dot")  # write to dot file
-
+    A = nx.nx_agraph.to_agraph(state.G)
+    A.write(f"{file_name}.dot")
     A.draw(f"{file_name}.png", prog="neato")
-
-
-def walk_graph(session, G):
-    for node in G.nodes:
-        print(f"Node: {node}")
-
-        pn = G.nodes[node]["data"]
-
-        if not pn.exists(session):
-            # create
-            print("create")
-            pn.create(session, G)
-        """    
-        for e in G.neighbors(node):
-            
-            print(f"\tEdge: {e}")
-            edge = G.edges[node,e]
-            print(f"\t{edge}")
-        """
