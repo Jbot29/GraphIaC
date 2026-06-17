@@ -3,7 +3,7 @@ from typing import Optional
 
 from botocore.exceptions import ClientError
 
-from GraphIaC.models import BaseEdge, BaseNode
+from GraphIaC.models import BaseEdge, BaseNode, VerifyResult
 
 from ..logs import setup_logger
 
@@ -166,6 +166,66 @@ class CloudFrontDistribution(BaseNode):
     def update(self, session, G, diff=None):
         pass
 
+    def verify(self, session, G) -> list:
+        if not self.distribution_id:
+            return [VerifyResult(name="Distribution exists", passed=False,
+                                 message="no distribution_id — not yet created")]
+        cf = session.client("cloudfront")
+        results = []
+        try:
+            resp = cf.get_distribution(Id=self.distribution_id)
+            dist = resp["Distribution"]
+            config = dist["DistributionConfig"]
+            origin = config["Origins"]["Items"][0]
+            cache_behavior = config["DefaultCacheBehavior"]
+            viewer_cert = config["ViewerCertificate"]
+
+            # HTTPS enforcement
+            vpp = cache_behavior.get("ViewerProtocolPolicy", "")
+            https_ok = vpp in ("redirect-to-https", "https-only")
+            results.append(VerifyResult(
+                name="HTTPS enforced",
+                passed=https_ok,
+                message=vpp if https_ok else f"ViewerProtocolPolicy is '{vpp}'",
+            ))
+
+            # TLS minimum version
+            tls = viewer_cert.get("MinimumProtocolVersion", "")
+            tls_ok = tls >= "TLSv1.2_2021"
+            results.append(VerifyResult(
+                name="TLS minimum version",
+                passed=tls_ok,
+                message=tls if tls_ok else f"minimum TLS is '{tls}' — upgrade to TLSv1.2_2021",
+            ))
+
+            # OAC configured on S3 origin
+            oac_id = origin.get("OriginAccessControlId", "")
+            results.append(VerifyResult(
+                name="OAC configured on S3 origin",
+                passed=bool(oac_id),
+                message=f"OAC: {oac_id}" if oac_id else "no OAC — S3 origin may be open",
+            ))
+
+            # No legacy OAI
+            oai = origin.get("S3OriginConfig", {}).get("OriginAccessIdentity", "")
+            results.append(VerifyResult(
+                name="No legacy OAI in use",
+                passed=not oai,
+                message="using OAC (current)" if not oai else f"OAI still set: {oai}",
+            ))
+
+            # Distribution enabled
+            results.append(VerifyResult(
+                name="Distribution enabled",
+                passed=config.get("Enabled", False),
+                message="enabled" if config.get("Enabled") else "distribution is disabled",
+            ))
+
+        except ClientError as e:
+            results.append(VerifyResult(name="Distribution readable", passed=False,
+                                        message=str(e)))
+        return results
+
     def delete(self, session, G):
         if not self.distribution_id:
             return
@@ -274,6 +334,36 @@ class CloudFrontS3OACEdge(BaseEdge):
 
     def update(self, session, G, diff=None):
         self.create(session, G)
+
+    def verify(self, session, G) -> list:
+        cf_node = G.nodes[self.cf_g_id]["data"]
+        s3_node = G.nodes[self.s3_g_id]["data"]
+        results = []
+        if not cf_node.arn:
+            return [VerifyResult(name="OAC bucket policy", passed=False,
+                                 message="CloudFront ARN unknown — cannot verify")]
+        s3 = session.client("s3")
+        try:
+            resp = s3.get_bucket_policy(Bucket=s3_node.bucket_name)
+            policy = json.loads(resp["Policy"])
+            arn_match = any(
+                stmt.get("Condition", {}).get("StringEquals", {}).get("AWS:SourceArn") == cf_node.arn
+                for stmt in policy.get("Statement", [])
+            )
+            results.append(VerifyResult(
+                name="Bucket policy scoped to this distribution",
+                passed=arn_match,
+                message=f"condition matches {cf_node.arn}" if arn_match
+                        else "policy exists but does not match this distribution's ARN",
+            ))
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchBucketPolicy":
+                results.append(VerifyResult(name="Bucket policy scoped to this distribution",
+                                            passed=False, message="no bucket policy found"))
+            else:
+                results.append(VerifyResult(name="Bucket policy scoped to this distribution",
+                                            passed=False, message=str(e)))
+        return results
 
     def delete(self, session, G):
         s3_node = G.nodes[self.s3_g_id]["data"]

@@ -3,7 +3,7 @@ from typing import Optional
 
 from botocore.exceptions import ClientError
 
-from GraphIaC.models import BaseNode
+from GraphIaC.models import BaseNode, VerifyResult
 
 from ..logs import setup_logger
 
@@ -57,6 +57,68 @@ class S3Bucket(BaseNode):
 
     def update(self, session, G, diff=None):
         pass
+
+    def verify(self, session, G) -> list:
+        s3 = session.client("s3")
+        results = []
+
+        # Check public access block
+        try:
+            resp = s3.get_public_access_block(Bucket=self.bucket_name)
+            cfg = resp["PublicAccessBlockConfiguration"]
+            all_blocked = all([
+                cfg.get("BlockPublicAcls"),
+                cfg.get("IgnorePublicAcls"),
+                cfg.get("BlockPublicPolicy"),
+                cfg.get("RestrictPublicBuckets"),
+            ])
+            results.append(VerifyResult(
+                name="Public access block",
+                passed=all_blocked,
+                message="all four settings enabled" if all_blocked else str(cfg),
+            ))
+        except ClientError:
+            results.append(VerifyResult(
+                name="Public access block",
+                passed=False,
+                message="no public access block configured",
+            ))
+
+        # Check bucket policy locks to CloudFront only
+        try:
+            resp = s3.get_bucket_policy(Bucket=self.bucket_name)
+            policy = json.loads(resp["Policy"])
+            cf_locked = any(
+                stmt.get("Principal", {}).get("Service") == "cloudfront.amazonaws.com"
+                and "AWS:SourceArn" in stmt.get("Condition", {}).get("StringEquals", {})
+                for stmt in policy.get("Statement", [])
+            )
+            public_grant = any(
+                stmt.get("Principal") in ("*", {"AWS": "*"})
+                and stmt.get("Effect") == "Allow"
+                for stmt in policy.get("Statement", [])
+            )
+            results.append(VerifyResult(
+                name="Bucket policy: CloudFront OAC scoped",
+                passed=cf_locked,
+                message="policy restricts access to CloudFront distribution" if cf_locked
+                        else "no CloudFront OAC condition found in policy",
+            ))
+            results.append(VerifyResult(
+                name="Bucket policy: no public Allow",
+                passed=not public_grant,
+                message="no public grants" if not public_grant
+                        else "WARNING: policy grants public access",
+            ))
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchBucketPolicy":
+                results.append(VerifyResult(
+                    name="Bucket policy",
+                    passed=False,
+                    message="no bucket policy — bucket may be accessible without restriction",
+                ))
+
+        return results
 
     def set_bucket_policy(self, session, policy: dict):
         s3 = session.client("s3")

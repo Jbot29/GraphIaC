@@ -2,7 +2,7 @@ from typing import Optional
 
 from botocore.exceptions import ClientError
 
-from GraphIaC.models import BaseEdge, BaseNode
+from GraphIaC.models import BaseEdge, BaseNode, VerifyResult
 
 from ..logs import setup_logger
 
@@ -71,6 +71,25 @@ class ACMCertificate(BaseNode):
         except ClientError as e:
             logger.error(f"Failed to request certificate for {self.domain_name}: {e}")
             raise
+
+    def verify(self, session, G) -> list:
+        live = self.read(session, G, self.g_id, self.read_id)
+        if not live:
+            return [VerifyResult(name="Certificate exists", passed=False,
+                                 message="certificate not found in ACM")]
+        results = [
+            VerifyResult(
+                name="Certificate status",
+                passed=live.status == "ISSUED",
+                message=live.status,
+            ),
+            VerifyResult(
+                name="Certificate domain",
+                passed=live.domain_name == self.domain_name,
+                message=live.domain_name,
+            ),
+        ]
+        return results
 
     def update(self, session, G, diff=None):
         pass  # ACM cert properties are immutable; status is read-only from AWS

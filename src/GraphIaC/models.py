@@ -4,6 +4,12 @@ from deepdiff import DeepDiff
 from pydantic import BaseModel
 
 
+class VerifyResult(BaseModel):
+    name: str
+    passed: bool
+    message: str = ""
+
+
 class BaseNode(BaseModel):
     g_id: str
 
@@ -23,6 +29,9 @@ class BaseNode(BaseModel):
 
     def delete(self, session, G):
         pass
+
+    def verify(self, session, G) -> list:
+        return []
 
     def diff(self, session, G, diff_object):
         if not isinstance(diff_object, self.__class__):
@@ -64,6 +73,9 @@ class BaseEdge(BaseModel):
 
     def delete(self, session, G):
         pass
+
+    def verify(self, session, G) -> list:
+        return []
 
     def diff(self, session, G, diff_object):
         if not isinstance(diff_object, self.__class__):

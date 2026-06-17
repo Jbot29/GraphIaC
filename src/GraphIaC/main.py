@@ -208,6 +208,44 @@ def run(state):
     logger.plan(f"Done. {', '.join(parts)}.")
 
 
+def verify(state):
+    logger.plan("Verifying infrastructure...")
+    total_passed = 0
+    total_failed = 0
+
+    def _print_results(label, results):
+        nonlocal total_passed, total_failed
+        if not results:
+            return
+        logger.info(f"  {label}")
+        for r in results:
+            if r.passed:
+                logger.info(f"    ✓ {r.name}" + (f": {r.message}" if r.message else ""))
+                total_passed += 1
+            else:
+                logger.warning(f"    ✗ {r.name}" + (f": {r.message}" if r.message else ""))
+                total_failed += 1
+
+    for node_id in state.G.nodes:
+        node = state.G.nodes[node_id]["data"]
+        results = node.verify(state.session, state.G)
+        _print_results(f"{node.__class__.__name__} [{node_id}]", results)
+
+    for src, dst, data in state.G.edges(data=True):
+        edge = data["data"]
+        results = edge.verify(state.session, state.G)
+        _print_results(f"{edge.__class__.__name__} [{src} → {dst}]", results)
+
+    if total_passed == 0 and total_failed == 0:
+        logger.plan("No verify() checks defined for this infrastructure.")
+        return
+
+    if total_failed:
+        logger.warning(f"Summary: {total_passed} passed, {total_failed} failed.")
+    else:
+        logger.plan(f"All checks passed. {total_passed} passed, 0 failed.")
+
+
 def run_import(state, db_conn, imports):
     for i in imports:
         logger.info(f"Importing {i.g_id}")

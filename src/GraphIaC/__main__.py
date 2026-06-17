@@ -78,8 +78,8 @@ def main():
     # parser.add_argument('version',help="Version")
     parser.add_argument(
         "command",
-        choices=["plan", "run", "diagram", "import"],
-        help="The command to run (e.g., plan)",
+        choices=["plan", "run", "diagram", "import", "verify"],
+        help="The command to run (e.g., plan, run, verify)",
     )
 
     args = parser.parse_args()
@@ -116,13 +116,13 @@ def main():
     gioc = GraphIaC.init(session, db_conn)
 
     if args.command == "run":
-        print("Run")
-
         user_infra_module.infra(gioc)
+        GraphIaC.run(gioc)
+        return
 
-        updates = GraphIaC.run(gioc)
-
-        print(updates)
+    elif args.command == "verify":
+        user_infra_module.infra(gioc)
+        GraphIaC.verify(gioc)
         return
 
     elif args.command == "import":
