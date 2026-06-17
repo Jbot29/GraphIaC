@@ -122,8 +122,8 @@ def main():
 
     elif args.command == "verify":
         user_infra_module.infra(gioc)
-        GraphIaC.verify(gioc)
-        return
+        failed = GraphIaC.verify(gioc)
+        raise SystemExit(1 if failed else 0)
 
     elif args.command == "import":
         logger.plan("Import")

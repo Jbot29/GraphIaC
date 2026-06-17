@@ -243,12 +243,14 @@ def verify(state):
 
     if total_passed == 0 and total_failed == 0:
         logger.plan("No verify() checks defined for this infrastructure.")
-        return
+        return total_failed
 
     if total_failed:
         logger.warning(f"Summary: {total_passed} passed, {total_failed} failed.")
     else:
         logger.plan(f"All checks passed. {total_passed} passed, 0 failed.")
+
+    return total_failed
 
 
 def run_import(state, db_conn, imports):
