@@ -228,7 +228,12 @@ def verify(state):
 
     for node_id in state.G.nodes:
         node = state.G.nodes[node_id]["data"]
-        results = node.verify(state.session, state.G)
+        live = node.read(state.session, state.G, g_id=node.g_id, read_id=node.read_id)
+        if live:
+            state.G.nodes[node_id]["data"] = live  # update graph so edges see current state
+            results = live.verify(state.session, state.G)
+        else:
+            results = node.verify(state.session, state.G)
         _print_results(f"{node.__class__.__name__} [{node_id}]", results)
 
     for src, dst, data in state.G.edges(data=True):
