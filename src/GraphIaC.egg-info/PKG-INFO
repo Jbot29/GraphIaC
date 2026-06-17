@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: GraphIaC
-Version: 0.0.2
+Version: 0.0.3
 Summary: GraphIaC
 Author-email: Jeremy Schwartz <jerschwartz@gmail.com>
 Project-URL: Homepage, https://github.com/Jbot29/GraphIaC
@@ -112,14 +112,14 @@ python -m GraphIaC <aws-profile> --infra_file <path/to/infra.py> <command>
 **Examples**
 
 ```bash
-# Preview changes for a profile named fndtn_web_deploy
-python -m GraphIaC fndtn_web_deploy --infra_file infra.py plan
+# Preview changes for a profile named my-aws-profile
+python -m GraphIaC my-aws-profile --infra_file infra.py plan
 
 # Apply changes
-python -m GraphIaC fndtn_web_deploy --infra_file infra.py run
+python -m GraphIaC my-aws-profile --infra_file infra.py run
 
 # Render a diagram
-python -m GraphIaC fndtn_web_deploy --infra_file infra.py diagram
+python -m GraphIaC my-aws-profile --infra_file infra.py diagram
 ```
 
 The SQLite state DB is created automatically next to the infra file (e.g. `infra.py` → `infra.db`). Your infra file must expose an `infra(state)` function that builds the graph:

@@ -162,7 +162,7 @@ def db_create_edge(conn, source_name, destination_name, edge, weight=1):
     try:
         cursor.execute(
             """
-            INSERT INTO edges (source, destination, weight, type,data)
+            INSERT OR IGNORE INTO edges (source, destination, weight, type, data)
             VALUES (?, ?, ?, ?, ?)
         """,
             (source, destination, weight, edge_type, edge_data),

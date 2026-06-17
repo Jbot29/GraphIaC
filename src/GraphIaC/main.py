@@ -125,8 +125,7 @@ def plan(state):
         edge_data = edge[2]["data"]
         edge_id = None
 
-        # does it already exist in Cloud
-        edge_data.read(state.session, state.G)
+        live_edge = edge_data.read(state.session, state.G)
 
         source_id = get_node_by_id(state.db_conn, edge[0])
         destination_id = get_node_by_id(state.db_conn, edge[1])
@@ -134,14 +133,10 @@ def plan(state):
         if source_id and destination_id:
             edge_id = get_edge_by_id(state.db_conn, source_id[0], destination_id[0])
 
-        if not edge_id:
+        if not edge_id or not live_edge:
             logger.info(f"CREATE EDGE: {edge_data.source_g_id} -> {edge_data.destination_g_id}")
             create_op = Operation(operation=OperationType.CREATE_EDGE, obj=edge_data)
-
             plan_ops.append(create_op)
-        else:
-            # todo finish with diff
-            edge_data.read(state.session, state.G)
 
     # check for deleted items
     for orphaned_node in db_get_rows_not_in_list(state.db_conn, "nodes", db_nodes_seen):
