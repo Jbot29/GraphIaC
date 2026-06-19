@@ -41,20 +41,20 @@ pytest tests/aws/test_dynamodb.py   # requires AWS credentials
 
 **Publish to PyPI:**
 ```bash
-python3 -m build
-twine upload dist/*
+./publish.sh
 ```
-Bump `version` in `pyproject.toml` before each publish. Package is live at `pip install GraphIaC`.
+Auto-bumps the patch version in `pyproject.toml`, builds, and uploads. User must run this themselves — it requires their PyPI API key. Package is live at `pip install GraphIaC`.
 
 ## Architecture
 
 ### Core Engine (`src/GraphIaC/main.py`)
 
-Four public functions form the user-facing API: `init()`, `add_node()`, `plan()`, `run()`.
+Six public functions form the user-facing API: `init()`, `add_node()`, `add_edge()`, `plan()`, `run()`, `verify()`.
 
 - `init(session, db_conn)` → `GraphIaCState`: creates a NetworkX DiGraph and connects to the SQLite state DB
 - `plan(state)`: reads current AWS state for every node/edge via boto3, diffs against the local DB, returns a list of `(operation, item)` tuples where operation ∈ `{CREATE, UPDATE, DELETE, IMPORT}`
 - `run(state)`: executes the plan — order is CREATE then UPDATE then DELETE
+- `verify(state)`: independent security/config audit — reads live AWS state for every node and edge, calls each object's `verify()` method, prints pass/fail results, returns total failure count (for exit-code CI gating)
 - `export_graph(state)`: renders the graph as a Graphviz DOT/PNG diagram
 
 ### State Model
@@ -75,8 +75,13 @@ Every AWS resource subclasses `BaseNode`; every relationship subclasses `BaseEdg
 - `create(session, G)` — call boto3 to provision
 - `update(session, G, diff)` — apply changes from DeepDiff output
 - `delete(session, G)` — deprovision
+- `verify(session, G) -> list[VerifyResult]` — optional; return pass/fail checks for the `verify` command
 
 `g_id` is the stable local identifier; `read_id` is the AWS resource ID (often different).
+
+**`VerifyResult`** is a Pydantic model with `name: str`, `passed: bool`, `message: str = ""`. Return one per check from `verify()`.
+
+**Diff behavior:** `BaseNode.diff()` and `BaseEdge.diff()` only compare fields that `self` has set to a non-None value. This means sparse infra.py definitions (e.g. `HostedZone(g_id="hz", domain_name="begrif.co")` with `zone_id=None`) do not false-positive against fully-populated AWS state. Only fields the user explicitly set are checked for drift.
 
 ### AWS Modules (`src/GraphIaC/aws/`)
 
@@ -89,10 +94,11 @@ Examples of the edge pattern:
 - `ACMCertificateHostedZoneEdge` — adds Route53 CNAME validation records so ACM can issue the cert
 - `CloudFrontS3OACEdge` — sets an S3 bucket policy allowing only a specific CloudFront distribution (OAC pattern)
 - `CloudFrontRoute53Edge` — creates a Route53 A alias record pointing a domain at a CloudFront distribution; reads the CF domain name from the graph at `create()` time so it works in the same run as CF creation
+- `CloudFrontFunctionEdge` — associates a `CloudFrontFunction` with a distribution's default cache behavior on the viewer-request event; knows which event type and how to patch the distribution config
 
 Current node inventory by service:
 - **ACM** (`certificate.py`): `ACMCertificate`
-- **CloudFront** (`cloudfront.py`): `CloudFrontDistribution`
+- **CloudFront** (`cloudfront.py`): `CloudFrontDistribution`, `CloudFrontFunction`
 - **Route53** (`route53.py`): `HostedZone`, `Route53AliasRecord`
 - **S3** (`s3.py`): `S3Bucket`
 - **IAM** (`iam_role.py`, `iam_policy.py`): `IAMRole`

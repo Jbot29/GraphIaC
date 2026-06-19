@@ -23,6 +23,7 @@ A secondary benefit: because the infrastructure is a graph, you can render it as
 - **Edges** — the connections between resources; each edge knows what it takes to wire two nodes together (IAM policies, invoke permissions, etc.)
 - **State reconciliation** — on every `plan()`, GraphIaC diffs live AWS state against a local SQLite DB and produces a list of `CREATE`, `UPDATE`, `DELETE`, or `IMPORT` operations
 - **`run()`** — executes the plan in the correct order
+- **`verify()`** — an independent audit layer that reads directly from AWS (bypasses the local DB) and runs per-resource security and configuration checks; exits non-zero for CI gating
 
 ## Install
 
@@ -81,6 +82,7 @@ python -m GraphIaC <aws-profile> --infra_file <path/to/infra.py> <command>
 |---------|--------------|
 | `plan` | Diffs live AWS state against the local DB and prints the changes that would be applied |
 | `run` | Applies the plan — creates, updates, and deletes resources |
+| `verify` | Reads live AWS state and runs per-resource security and config checks; exits 1 if any check fails (for CI gating) |
 | `diagram` | Renders the infrastructure graph as a Graphviz PNG |
 | `import` | Imports existing AWS resources into local state |
 
@@ -92,6 +94,9 @@ python -m GraphIaC my-aws-profile --infra_file infra.py plan
 
 # Apply changes
 python -m GraphIaC my-aws-profile --infra_file infra.py run
+
+# Verify live infrastructure (exits 1 if any check fails)
+python -m GraphIaC my-aws-profile --infra_file infra.py verify
 
 # Render a diagram
 python -m GraphIaC my-aws-profile --infra_file infra.py diagram

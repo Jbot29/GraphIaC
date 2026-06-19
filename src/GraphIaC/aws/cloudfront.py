@@ -489,3 +489,221 @@ class CloudFrontRoute53Edge(BaseEdge):
         except Exception as e:
             logger.error(f"Failed to delete Route53 alias record: {e}")
             raise
+
+
+class CloudFrontFunction(BaseNode):
+    """A CloudFront Function (viewer-request handler) managed as a graph node."""
+
+    name: str                          # CloudFront function name (unique per account)
+    function_code: str                 # JavaScript source code
+    comment: str = ""
+    runtime: str = "cloudfront-js-2.0"
+    function_arn: Optional[str] = None
+
+    @property
+    def read_id(self) -> Optional[str]:
+        return self.name
+
+    @classmethod
+    def read(cls, session, G, g_id, read_id, **kwargs):
+        cf = session.client("cloudfront")
+        name = read_id or g_id
+        try:
+            # describe_function gives metadata; get_function gives the code
+            desc = cf.describe_function(Name=name, Stage="LIVE")
+            summary = desc["FunctionSummary"]
+            code_resp = cf.get_function(Name=name, Stage="LIVE")
+            code = code_resp["FunctionCode"].read().decode("utf-8")
+            return cls(
+                g_id=g_id,
+                name=name,
+                function_code=code,
+                comment=summary["FunctionConfig"].get("Comment", ""),
+                runtime=summary["FunctionConfig"]["Runtime"],
+                function_arn=summary["FunctionMetadata"]["FunctionARN"],
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchFunctionExists":
+                return None
+            logger.error(f"Error reading CloudFront function {name}: {e}")
+        return None
+
+    def create(self, session, G):
+        cf = session.client("cloudfront")
+        try:
+            resp = cf.create_function(
+                Name=self.name,
+                FunctionConfig={"Comment": self.comment, "Runtime": self.runtime},
+                FunctionCode=self.function_code.encode("utf-8"),
+            )
+            etag = resp["ETag"]
+            self.function_arn = resp["FunctionSummary"]["FunctionMetadata"]["FunctionARN"]
+            cf.publish_function(Name=self.name, IfMatch=etag)
+            logger.info(f"Created and published CloudFront function {self.name}")
+        except ClientError as e:
+            logger.error(f"Failed to create CloudFront function {self.name}: {e}")
+            raise
+
+    def update(self, session, G, diff=None):
+        cf = session.client("cloudfront")
+        try:
+            desc = cf.describe_function(Name=self.name, Stage="DEVELOPMENT")
+            etag = desc["ETag"]
+            resp = cf.update_function(
+                Name=self.name,
+                IfMatch=etag,
+                FunctionConfig={"Comment": self.comment, "Runtime": self.runtime},
+                FunctionCode=self.function_code.encode("utf-8"),
+            )
+            cf.publish_function(Name=self.name, IfMatch=resp["ETag"])
+            logger.info(f"Updated and published CloudFront function {self.name}")
+        except ClientError as e:
+            logger.error(f"Failed to update CloudFront function {self.name}: {e}")
+            raise
+
+    def delete(self, session, G):
+        cf = session.client("cloudfront")
+        try:
+            desc = cf.describe_function(Name=self.name, Stage="DEVELOPMENT")
+            cf.delete_function(Name=self.name, IfMatch=desc["ETag"])
+            logger.info(f"Deleted CloudFront function {self.name}")
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchFunctionExists":
+                return
+            logger.error(f"Failed to delete CloudFront function {self.name}: {e}")
+            raise
+
+    def verify(self, session, G) -> list:
+        cf = session.client("cloudfront")
+        try:
+            resp = cf.describe_function(Name=self.name, Stage="LIVE")
+            status = resp["FunctionSummary"].get("Status", "")
+            return [VerifyResult(
+                name="Function published to LIVE",
+                passed=True,
+                message=f"status: {status}",
+            )]
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchFunctionExists":
+                return [VerifyResult(name="Function published to LIVE", passed=False,
+                                     message=f"{self.name} not found in LIVE stage")]
+            return [VerifyResult(name="Function readable", passed=False, message=str(e))]
+
+
+class CloudFrontFunctionEdge(BaseEdge):
+    """
+    Associates a CloudFrontFunction with a CloudFrontDistribution on the viewer-request
+    event of the default cache behavior. The edge holds the wiring intelligence: which
+    event type, how to patch the distribution config, and how to verify the association.
+    """
+
+    fn_g_id: str
+    cf_g_id: str
+    event_type: str = "viewer-request"
+
+    @property
+    def source_g_id(self):
+        return self.fn_g_id
+
+    @property
+    def destination_g_id(self):
+        return self.cf_g_id
+
+    def _fn_arn(self, G) -> Optional[str]:
+        return G.nodes[self.fn_g_id]["data"].function_arn
+
+    def read(self, session, G=None):
+        if G is None:
+            return None
+        cf_node = G.nodes[self.cf_g_id]["data"]
+        fn_arn = self._fn_arn(G)
+        if not cf_node.distribution_id or not fn_arn:
+            return None
+        cf = session.client("cloudfront")
+        try:
+            resp = cf.get_distribution_config(Id=cf_node.distribution_id)
+            items = resp["DistributionConfig"]["DefaultCacheBehavior"].get(
+                "FunctionAssociations", {}
+            ).get("Items", [])
+            for a in items:
+                if a["FunctionARN"] == fn_arn and a["EventType"] == self.event_type:
+                    return self
+        except ClientError as e:
+            logger.error(f"Error reading CloudFront function association: {e}")
+        return None
+
+    def create(self, session, G):
+        cf_node = G.nodes[self.cf_g_id]["data"]
+        fn_arn = self._fn_arn(G)
+        if not fn_arn or not cf_node.distribution_id:
+            logger.warning("Function ARN or distribution ID unavailable; skipping association")
+            return
+        cf = session.client("cloudfront")
+        try:
+            resp = cf.get_distribution_config(Id=cf_node.distribution_id)
+            config = resp["DistributionConfig"]
+            etag = resp["ETag"]
+            assocs = config["DefaultCacheBehavior"].setdefault(
+                "FunctionAssociations", {"Quantity": 0, "Items": []}
+            )
+            assocs["Items"] = [a for a in assocs.get("Items", []) if a["EventType"] != self.event_type]
+            assocs["Items"].append({"FunctionARN": fn_arn, "EventType": self.event_type})
+            assocs["Quantity"] = len(assocs["Items"])
+            cf.update_distribution(
+                Id=cf_node.distribution_id, DistributionConfig=config, IfMatch=etag
+            )
+            logger.info(
+                f"Associated {fn_arn} with distribution {cf_node.distribution_id} "
+                f"on {self.event_type}"
+            )
+        except ClientError as e:
+            logger.error(f"Failed to associate CloudFront function: {e}")
+            raise
+
+    def update(self, session, G, diff=None):
+        self.create(session, G)
+
+    def delete(self, session, G):
+        cf_node = G.nodes[self.cf_g_id]["data"]
+        fn_arn = self._fn_arn(G)
+        if not fn_arn or not cf_node.distribution_id:
+            return
+        cf = session.client("cloudfront")
+        try:
+            resp = cf.get_distribution_config(Id=cf_node.distribution_id)
+            config = resp["DistributionConfig"]
+            etag = resp["ETag"]
+            assocs = config["DefaultCacheBehavior"].get(
+                "FunctionAssociations", {"Quantity": 0, "Items": []}
+            )
+            assocs["Items"] = [a for a in assocs["Items"] if a["FunctionARN"] != fn_arn]
+            assocs["Quantity"] = len(assocs["Items"])
+            config["DefaultCacheBehavior"]["FunctionAssociations"] = assocs
+            cf.update_distribution(
+                Id=cf_node.distribution_id, DistributionConfig=config, IfMatch=etag
+            )
+            logger.info(f"Removed function association from distribution {cf_node.distribution_id}")
+        except ClientError as e:
+            logger.error(f"Failed to remove CloudFront function association: {e}")
+            raise
+
+    def verify(self, session, G) -> list:
+        cf_node = G.nodes[self.cf_g_id]["data"]
+        fn_arn = self._fn_arn(G)
+        if not fn_arn or not cf_node.distribution_id:
+            return [VerifyResult(name="Function associated", passed=False,
+                                 message="function ARN or distribution ID unknown")]
+        cf = session.client("cloudfront")
+        try:
+            resp = cf.get_distribution_config(Id=cf_node.distribution_id)
+            items = resp["DistributionConfig"]["DefaultCacheBehavior"].get(
+                "FunctionAssociations", {}
+            ).get("Items", [])
+            ok = any(a["FunctionARN"] == fn_arn and a["EventType"] == self.event_type for a in items)
+            return [VerifyResult(
+                name=f"Function associated on {self.event_type}",
+                passed=ok,
+                message=f"ARN: {fn_arn}" if ok else f"function not wired to {self.event_type}",
+            )]
+        except ClientError as e:
+            return [VerifyResult(name="Function association readable", passed=False, message=str(e))]

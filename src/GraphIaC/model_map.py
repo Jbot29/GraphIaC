@@ -2,6 +2,8 @@ from GraphIaC.aws.apigateway import ApiEndpoint, ApiSite
 from GraphIaC.aws.certificate import ACMCertificate, ACMCertificateHostedZoneEdge
 from GraphIaC.aws.cloudfront import (
     CloudFrontDistribution,
+    CloudFrontFunction,
+    CloudFrontFunctionEdge,
     CloudFrontRoute53Edge,
     CloudFrontS3OACEdge,
 )
@@ -25,6 +27,8 @@ BASE_MODEL_MAP = {
     "ACMCertificateHostedZoneEdge": ACMCertificateHostedZoneEdge,
     "S3Bucket": S3Bucket,
     "CloudFrontDistribution": CloudFrontDistribution,
+    "CloudFrontFunction": CloudFrontFunction,
+    "CloudFrontFunctionEdge": CloudFrontFunctionEdge,
     "CloudFrontS3OACEdge": CloudFrontS3OACEdge,
     "CloudFrontRoute53Edge": CloudFrontRoute53Edge,
     "IAMRole": IAMRole,

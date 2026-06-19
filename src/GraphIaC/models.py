@@ -37,7 +37,12 @@ class BaseNode(BaseModel):
         if not isinstance(diff_object, self.__class__):
             return False
 
-        return DeepDiff(self.model_dump(), diff_object.model_dump())
+        # Only compare fields self has explicitly set (non-None, non-g_id).
+        # This prevents sparse infra.py definitions (zone_id=None, arn=None, etc.)
+        # from always diffing against fully-populated AWS state.
+        self_d = {k: v for k, v in self.model_dump().items() if k != "g_id" and v is not None}
+        other_d = {k: diff_object.model_dump().get(k) for k in self_d}
+        return DeepDiff(self_d, other_d)
 
     def import_from_provider(self):
         class_name = self.__class__.__name__
@@ -81,4 +86,6 @@ class BaseEdge(BaseModel):
         if not isinstance(diff_object, self.__class__):
             return False
 
-        return DeepDiff(self.model_dump(), diff_object.model_dump())
+        self_d = {k: v for k, v in self.model_dump().items() if v is not None}
+        other_d = {k: diff_object.model_dump().get(k) for k in self_d}
+        return DeepDiff(self_d, other_d)
