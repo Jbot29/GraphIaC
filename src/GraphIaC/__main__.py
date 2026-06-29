@@ -24,32 +24,6 @@ def load_user_infra_module(file_path):
     return module
 
 
-def import_plan(profile, db_conn, user_infra_module):
-    print("Plan: Import")
-
-    session = boto3.session.Session(profile_name=profile)
-
-    imports = []
-
-    user_infra_module.infra_import(session, imports)
-    print(imports)
-    return
-
-
-def import_run(profile, db_path, user_infra_module):
-    print("Plan: Import")
-
-    session = boto3.session.Session(profile_name=profile, region_name="us-east-1")
-
-    imports = []
-
-    user_infra_module.infra_import(session, imports)
-    print(imports)
-
-    GraphIaC.run_import(session, db_path, imports)
-    return
-
-
 def plan(profile, db_conn, user_infra_module):
     logger.info("GraphIOC: Plan")
 
@@ -74,11 +48,10 @@ def main():
 
     parser.add_argument("profile", help="Aws Profile to use")
     parser.add_argument("--infra_file", help="Path to the user's infrastructure definition file")
-    parser.add_argument("--import_file", help="Path to the user's import definition file")
     # parser.add_argument('version',help="Version")
     parser.add_argument(
         "command",
-        choices=["plan", "run", "diagram", "import", "verify"],
+        choices=["plan", "run", "diagram", "verify"],
         help="The command to run (e.g., plan, run, verify)",
     )
 
@@ -89,10 +62,8 @@ def main():
     # Load the user's infrastructure file
     if args.infra_file:
         user_module_path = args.infra_file
-    elif args.import_file:
-        user_module_path = args.import_file
     else:
-        print("Infra or import file needed")
+        print("Infra file needed")
         return
 
     user_infra_module = load_user_infra_module(user_module_path)
@@ -124,11 +95,6 @@ def main():
         user_infra_module.infra(gioc)
         failed = GraphIaC.verify(gioc)
         raise SystemExit(1 if failed else 0)
-
-    elif args.command == "import":
-        logger.plan("Import")
-        logger.plan(f"Import from file ... {user_module_path}")
-        user_infra_module.infra(gioc)
 
     elif args.command == "diagram":
         print("Diagram")

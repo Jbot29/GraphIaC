@@ -253,12 +253,6 @@ def verify(state):
     return total_failed
 
 
-def run_import(state, db_conn, imports):
-    for i in imports:
-        logger.info(f"Importing {i.g_id}")
-        db_create_node(db_conn, i)
-
-
 def export_graph(state, file_name):
     A = nx.nx_agraph.to_agraph(state.G)
     A.write(f"{file_name}.dot")

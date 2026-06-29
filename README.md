@@ -84,7 +84,6 @@ python -m GraphIaC <aws-profile> --infra_file <path/to/infra.py> <command>
 | `run` | Applies the plan — creates, updates, and deletes resources |
 | `verify` | Reads live AWS state and runs per-resource security and config checks; exits 1 if any check fails (for CI gating) |
 | `diagram` | Renders the infrastructure graph as a Graphviz PNG |
-| `import` | Imports existing AWS resources into local state |
 
 **Examples**
 
@@ -111,6 +110,45 @@ def infra(state):
     GraphIaC.add_node(state, table)
     # add more nodes and edges...
 ```
+
+## Importing Existing Resources
+
+If you built infrastructure by hand (or with another tool) before adopting GraphIaC, you don't need to tear it down and recreate it. Import is **automatic** — there's no separate import step to run.
+
+`plan()` reconciles three layers: live AWS state, the local SQLite DB (what was last applied), and your code. When a node is **declared in `infra.py`** and **exists in AWS** but is **not yet in the DB**, GraphIaC marks it `IMPORT`: on the next `run`, it records the resource's live state into the DB without creating or modifying anything in AWS.
+
+So adopting an existing resource is just: declare it, then run.
+
+```python
+# infra.py — adopt a website that already exists in AWS
+def infra(state):
+    bucket = S3Bucket(g_id="web_bucket", bucket_name="my-site-prod", region="us-east-2")
+    GraphIaC.add_node(state, bucket)
+
+    dist = CloudFrontDistribution(
+        g_id="web_cf",
+        domain_name="example.com",
+        cert_arn="arn:aws:acm:us-east-1:...:certificate/...",
+        distribution_id="E3ENDXK34ZYQPN",  # optional; speeds up lookup
+    )
+    GraphIaC.add_node(state, dist)
+```
+
+```bash
+python -m GraphIaC my-profile --infra_file infra.py plan
+#   ↳ S3Bucket [web_bucket]              will be imported
+#   ↳ CloudFrontDistribution [web_cf]    will be imported
+
+python -m GraphIaC my-profile --infra_file infra.py run   # records live state to the DB
+```
+
+A few things worth knowing:
+
+- **You only need to declare the fields you care about.** `read()` fetches the full live state from AWS, and `diff()` only compares fields you explicitly set to a non-`None` value — so a sparse declaration like `HostedZone(g_id="hz", domain_name="example.com")` won't false-positive as drift against the fully-populated AWS resource.
+- **Lookup is by ID or by natural key.** Most nodes can be found by a human-friendly identifier (a bucket name, a domain, a hosted-zone name) when you haven't supplied the AWS resource ID yet, so you can usually import without hunting down ARNs first.
+- **Edges are re-asserted, not imported.** GraphIaC's edges (IAM policies, bucket policies, DNS records, service integrations) are written to be idempotent, so on the first `run` they re-apply against the existing wiring — which changes nothing if it's already in place — and are then tracked in the DB like everything else.
+
+After the first `run`, the imported resources are under management: subsequent plans diff against the DB and only show real changes.
 
 ## Running Tests
 
