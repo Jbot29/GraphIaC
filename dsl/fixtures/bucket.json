@@ -1,0 +1,14 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "my-test-bucket",
+        "type": "S3Bucket",
+        "fields": { "region": "us-east-2", "bucket_name": "my-test-bucket" },
+        "line": 2
+      }
+    ],
+    "edges": []
+  },
+  "errors": []
+}

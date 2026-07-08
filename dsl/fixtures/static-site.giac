@@ -1,0 +1,11 @@
+# Static site: Route53 -> CloudFront (HTTPS) -> S3
+domain = "begrif.co"
+
+hz     : HostedZone(domain_name: domain)
+cert   : ACMCertificate(domain_name: domain)
+bucket : S3Bucket("begrif-co-site")
+cf     : CloudFrontDistribution(domain_name: domain, cert_arn: cert.arn)
+
+cert -> hz                          # validation CNAMEs
+cf   -> bucket                      # OAC bucket policy
+cf   -> hz : (domain_name: domain)  # A alias record

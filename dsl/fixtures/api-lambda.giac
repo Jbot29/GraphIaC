@@ -1,0 +1,10 @@
+# HTTP API -> Lambda, with an execution role
+api-role : IAMRole
+handler  : LambdaZipFile(runtime: "python3.12", handler: "app.handler",
+                         zip_file_path: "build/app.zip")
+api      : ApiSite(region: "us-east-2")
+hello    : ApiEndpoint(method: "GET", path: "/hello")
+
+api-role -> handler       # execution policy attached
+api -> hello              # route on the HTTP API
+hello -> handler          # integration + invoke permission

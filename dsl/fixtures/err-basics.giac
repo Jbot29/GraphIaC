@@ -1,0 +1,4 @@
+bucket : S3Bucket
+bucket : S3Bucket
+web    : WebSocket
+fn     : LambdaZipFile

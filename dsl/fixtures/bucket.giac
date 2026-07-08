@@ -1,0 +1,2 @@
+# the smallest graph — the label is the g_id AND the bucket name
+my-test-bucket : S3Bucket(region: "us-east-2")
