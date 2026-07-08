@@ -1,0 +1,25 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "bucket",
+        "type": "S3Bucket",
+        "fields": { "bucket_name": "bucket" },
+        "line": 1
+      },
+      {
+        "g_id": "table",
+        "type": "DynamoTable",
+        "fields": {
+          "partition_key": { "name": "id", "attr_type": "S" },
+          "table_name": "table"
+        },
+        "line": 2
+      }
+    ],
+    "edges": []
+  },
+  "errors": [
+    { "line": 4, "includes": "no edge type known between S3Bucket and DynamoTable" }
+  ]
+}

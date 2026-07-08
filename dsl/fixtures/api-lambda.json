@@ -1,0 +1,56 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "api-role",
+        "type": "IAMRole",
+        "fields": { "name": "api-role" },
+        "line": 2
+      },
+      {
+        "g_id": "handler",
+        "type": "LambdaZipFile",
+        "fields": {
+          "runtime": "python3.12",
+          "handler": "app.handler",
+          "zip_file_path": "build/app.zip",
+          "name": "handler"
+        },
+        "line": 3
+      },
+      {
+        "g_id": "api",
+        "type": "ApiSite",
+        "fields": { "region": "us-east-2", "site_name": "api" },
+        "line": 5
+      },
+      {
+        "g_id": "hello",
+        "type": "ApiEndpoint",
+        "fields": { "method": "GET", "path": "/hello", "endpoint_name": "hello" },
+        "line": 6
+      }
+    ],
+    "edges": [
+      {
+        "type": "IAMRolePolicyLambdaEdge",
+        "fields": { "role_g_id": "api-role", "node_g_id": "handler" },
+        "inferred": true,
+        "line": 8
+      },
+      {
+        "type": "SiteEndpointEdge",
+        "fields": { "site_node_g_id": "api", "endpoint_node_g_id": "hello" },
+        "inferred": true,
+        "line": 9
+      },
+      {
+        "type": "EndpointLambdaEdge",
+        "fields": { "endpoint_node_g_id": "hello", "lambda_node_g_id": "handler" },
+        "inferred": true,
+        "line": 10
+      }
+    ]
+  },
+  "errors": []
+}

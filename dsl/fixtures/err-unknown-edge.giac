@@ -1,0 +1,4 @@
+bucket : S3Bucket
+table  : DynamoTable(partition_key: {name: "id", attr_type: "S"})
+
+bucket -> table

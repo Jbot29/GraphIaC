@@ -59,6 +59,7 @@ class OperationType(Enum):
     DELETE = "delete"
     IMPORT = "import"
     CREATE_EDGE = "create_edge"
+    BLOCKED = "blocked"
 
 
 class Operation(BaseModel):
@@ -84,7 +85,15 @@ def _diff_summary(old, new):
     return "  " + ", ".join(parts) if parts else ""
 
 
-def plan(state):
+def plan(state, blocked=None):
+    """Diff code/DB/AWS into operations.
+
+    `blocked` is the list of BlockedItem from dsl.load_graph() (empty for
+    Python infra files): nodes/edges waiting on unresolved attribute
+    references. They are reported as BLOCKED operations, and their DB rows
+    are shielded from orphan deletion — a resource that was provisioned
+    and later became blocked must not read as "removed from the code".
+    """
     plan_ops = []
     db_nodes_seen = []
 
@@ -136,6 +145,13 @@ def plan(state):
             logger.plan(f"  + {cls_name} [{label}]  will be applied")
             plan_ops.append(Operation(operation=OperationType.CREATE_EDGE, obj=edge_data))
 
+    for b in blocked or []:
+        logger.plan(f"  ⊘ {b.type} [{b.g_id}]  BLOCKED — {b.reason}")
+        plan_ops.append(Operation(operation=OperationType.BLOCKED, obj=b))
+        row = get_node_by_id(state.db_conn, b.g_id)
+        if row:
+            db_nodes_seen.append(str(row[0]))
+
     for orphaned_node in db_get_rows_not_in_list(state.db_conn, "nodes", db_nodes_seen):
         on_last = load_model_from_db(state, orphaned_node[2], orphaned_node[3])
         cls_name = on_last.__class__.__name__
@@ -145,23 +161,26 @@ def plan(state):
     return plan_ops
 
 
-def run(state):
+def run(state, blocked=None):
     logger.plan("Planning...")
-    changes = plan(state)
+    changes = plan(state, blocked)
 
     if not changes:
         logger.info("No changes. Infrastructure is up to date.")
-        return
+        return []
 
     counts = {OperationType.CREATE: 0, OperationType.UPDATE: 0,
               OperationType.DELETE: 0, OperationType.IMPORT: 0,
-              OperationType.CREATE_EDGE: 0}
+              OperationType.CREATE_EDGE: 0, OperationType.BLOCKED: 0}
 
     logger.plan("Applying...")
     for change in changes:
         obj = change.obj
         cls_name = obj.__class__.__name__
         counts[change.operation] += 1
+
+        if change.operation == OperationType.BLOCKED:
+            continue  # nothing to do — re-run once the upstream is ready
 
         if change.operation == OperationType.CREATE:
             logger.info(f"  + [{obj.g_id}] creating {cls_name}...")
@@ -194,6 +213,7 @@ def run(state):
     deleted = counts[OperationType.DELETE]
     imported = counts[OperationType.IMPORT]
     edges = counts[OperationType.CREATE_EDGE]
+    n_blocked = counts[OperationType.BLOCKED]
     parts = []
     if created:
         parts.append(f"{created} created")
@@ -205,10 +225,18 @@ def run(state):
         parts.append(f"{imported} imported")
     if edges:
         parts.append(f"{edges} edges applied")
+    if n_blocked:
+        parts.append(f"{n_blocked} blocked (re-run when upstream is ready)")
     logger.plan(f"Done. {', '.join(parts)}.")
+    return changes
 
 
-def verify(state):
+def verify(state, collected=None):
+    """Audit live AWS state; returns the failure count (for CI exit codes).
+
+    Pass a list as `collected` to also receive every check as a dict
+    (label/name/passed/message) — the HTTP API uses this.
+    """
     logger.plan("Verifying infrastructure...")
     total_passed = 0
     total_failed = 0
@@ -219,6 +247,10 @@ def verify(state):
             return
         logger.info(f"  {label}")
         for r in results:
+            if collected is not None:
+                collected.append(
+                    {"label": label, "name": r.name, "passed": r.passed, "message": r.message}
+                )
             if r.passed:
                 logger.info(f"    ✓ {r.name}" + (f": {r.message}" if r.message else ""))
                 total_passed += 1

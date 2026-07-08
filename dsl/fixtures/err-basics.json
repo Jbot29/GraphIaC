@@ -1,0 +1,26 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "bucket",
+        "type": "S3Bucket",
+        "fields": { "bucket_name": "bucket" },
+        "line": 1
+      },
+      {
+        "g_id": "fn",
+        "type": "LambdaZipFile",
+        "fields": { "name": "fn" },
+        "line": 4
+      }
+    ],
+    "edges": []
+  },
+  "errors": [
+    { "line": 2, "includes": "duplicate label \"bucket\"" },
+    { "line": 3, "includes": "unknown node type \"WebSocket\"" },
+    { "line": 4, "includes": "missing required field \"handler\"" },
+    { "line": 4, "includes": "missing required field \"runtime\"" },
+    { "line": 4, "includes": "missing required field \"zip_file_path\"" }
+  ]
+}

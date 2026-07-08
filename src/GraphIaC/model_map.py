@@ -1,4 +1,4 @@
-from GraphIaC.aws.apigateway import ApiEndpoint, ApiSite
+from GraphIaC.aws.apigateway import ApiEndpoint, ApiSite, EndpointLambdaEdge, SiteEndpointEdge
 from GraphIaC.aws.certificate import ACMCertificate, ACMCertificateHostedZoneEdge
 from GraphIaC.aws.cloudfront import (
     CloudFrontDistribution,
@@ -11,8 +11,8 @@ from GraphIaC.aws.dynamodb import DynamoTable
 from GraphIaC.aws.ec2.alb import ALB
 from GraphIaC.aws.ec2.listener import Listener
 from GraphIaC.aws.ec2_sg import SecurityGroup
-from GraphIaC.aws.iam_role import IAMRole
-from GraphIaC.aws.lambda_func import LambdaZipFile
+from GraphIaC.aws.iam_role import IAMRole, IAMRoleInlinePolicyEdge, IAMRolePolicyEdge
+from GraphIaC.aws.lambda_func import IAMRolePolicyLambdaEdge, LambdaZipFile
 from GraphIaC.aws.route53 import HostedZone, Route53AliasRecord
 from GraphIaC.aws.s3 import S3Bucket
 from GraphIaC.aws.ses import LambdaSESEdge, SESDomainIdentity, SESDomainRoute53Edge
@@ -32,7 +32,12 @@ BASE_MODEL_MAP = {
     "CloudFrontS3OACEdge": CloudFrontS3OACEdge,
     "CloudFrontRoute53Edge": CloudFrontRoute53Edge,
     "IAMRole": IAMRole,
+    "IAMRolePolicyEdge": IAMRolePolicyEdge,
+    "IAMRoleInlinePolicyEdge": IAMRoleInlinePolicyEdge,
+    "IAMRolePolicyLambdaEdge": IAMRolePolicyLambdaEdge,
     "LambdaZipFile": LambdaZipFile,
+    "SiteEndpointEdge": SiteEndpointEdge,
+    "EndpointLambdaEdge": EndpointLambdaEdge,
     "SecurityGroup": SecurityGroup,
     "ALB": ALB,
     "Listener": Listener,

@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GraphIaC — infrastructure you can read (v0.1)</title>
+<style>
+  :root {
+    --paper:#f7f2e6; --paper-deep:#efe7d3; --ink:#22304a; --ink-soft:rgba(34,48,74,0.55);
+    --ink-faint:rgba(34,48,74,0.16); --vermilion:#c8451f; --teal:#1f7a6d; --water:#3d7fa6; --gold:#b98a1d;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --serif:Georgia,'Times New Roman',serif;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { height:100%; }
+  body {
+    background:var(--paper);
+    background-image:
+      repeating-linear-gradient(0deg,transparent 0 23px,rgba(34,48,74,0.045) 23px 24px),
+      repeating-linear-gradient(90deg,transparent 0 23px,rgba(34,48,74,0.045) 23px 24px);
+    color:var(--ink); font-family:var(--mono);
+    padding:16px 18px 14px; display:flex; flex-direction:column; gap:10px; overflow:hidden;
+  }
+  header { display:flex; align-items:baseline; justify-content:space-between; gap:12px;
+    border-bottom:2px solid var(--ink); padding-bottom:8px; flex:none; }
+  h1 { font-family:var(--serif); font-weight:600; font-style:italic; font-size:21px; }
+  h1 .fig { font-family:var(--mono); font-style:normal; font-weight:500; font-size:11px;
+    letter-spacing:0.18em; color:var(--vermilion); text-transform:uppercase; margin-right:10px; vertical-align:2px; }
+  header .sub { font-size:12px; color:var(--ink-soft); font-style:italic; font-family:var(--serif); }
+
+  .workspace { flex:1; display:grid; grid-template-columns:minmax(320px,5fr) minmax(380px,7fr);
+    gap:14px; min-height:0; }
+  .col { display:flex; flex-direction:column; gap:8px; min-height:0; min-width:0; }
+  .panel-label { font-size:9px; letter-spacing:0.2em; text-transform:uppercase; color:var(--ink-soft);
+    display:flex; justify-content:space-between; align-items:baseline; flex:none; }
+  .panel-label .hint { letter-spacing:0; text-transform:none; font-style:italic; font-family:var(--serif); font-size:12px; }
+
+  #editor { flex:1; min-height:120px; width:100%; resize:none; background:#fbf8ef;
+    border:2px solid var(--ink); box-shadow:3px 3px 0 rgba(34,48,74,0.18); color:var(--ink);
+    font-family:var(--mono); font-size:13px; line-height:1.6; padding:12px 14px; tab-size:2; }
+  #editor:focus { outline:none; border-color:var(--water); }
+
+  .controls { display:flex; gap:8px; align-items:center; flex:none; }
+  #serverBar { display:inline-flex; gap:8px; }
+  #serverBar[hidden] { display:none; }
+  button { font-family:var(--mono); font-size:12px; padding:7px 14px; cursor:pointer;
+    background:var(--ink); color:var(--paper); border:2px solid var(--ink); box-shadow:2px 2px 0 rgba(34,48,74,0.2); }
+  button:hover { background:var(--water); border-color:var(--water); }
+  button.ghost { background:transparent; color:var(--ink); }
+  button.ghost:hover { background:var(--paper-deep); color:var(--ink); border-color:var(--ink); }
+  #status { font-size:11px; color:var(--ink-soft); margin-left:auto; text-align:right; }
+  #status.err { color:var(--vermilion); }
+
+  #issues { flex:none; max-height:22%; overflow:auto; margin:0;
+    background:var(--paper-deep); border:2px solid var(--vermilion);
+    color:var(--ink); font-family:var(--mono); font-size:11px; line-height:1.55;
+    padding:8px 12px; white-space:pre-wrap; }
+  #issues .w { color:var(--gold); }
+  #issues .e { color:var(--vermilion); }
+
+  /* the source with every lens resolved */
+  #desugared { flex:none; max-height:38%; overflow:auto; margin:0;
+    background:var(--paper-deep); border:2px dashed var(--teal);
+    color:var(--ink); font-family:var(--mono); font-size:11px; line-height:1.55;
+    padding:10px 12px; white-space:pre; }
+
+  /* plan/run/verify output (server mode) */
+  #oplog { flex:none; max-height:34%; overflow:auto; margin:0;
+    background:var(--paper-deep); border:2px solid var(--ink);
+    color:var(--ink); font-family:var(--mono); font-size:11px; line-height:1.6;
+    padding:10px 12px; white-space:pre-wrap; }
+  .op-create, .op-create_edge, .ok { color:var(--teal); }
+  .op-update { color:var(--gold); }
+  .op-delete, .fail { color:var(--vermilion); }
+  .op-import { color:var(--water); }
+  .op-blocked { color:rgba(34,48,74,0.5); }
+
+  .view { flex:1; border:2px solid var(--ink); background:#fbf8ef; box-shadow:3px 3px 0 rgba(34,48,74,0.18);
+    display:flex; flex-direction:column; min-height:0; }
+  .view .cap { font-size:9px; letter-spacing:0.18em; text-transform:uppercase; color:var(--ink-soft);
+    padding:6px 10px 2px; display:flex; justify-content:space-between; flex:none; }
+  .view .cap b { color:var(--vermilion); font-weight:500; }
+  #graph { width:100%; flex:1; min-height:0; display:block; }
+</style>
+</head>
+<body>
+  <header>
+    <h1><span class="fig">GraphIaC</span> infrastructure you can read</h1>
+    <div class="sub">v0.1 — nodes · edges inferred from the pair · refs are data deps · desugar</div>
+  </header>
+
+  <div class="workspace">
+    <div class="col">
+      <div class="panel-label"><span>Source</span><span class="hint">label : Type(…) · a -&gt; b · other.field</span></div>
+      <textarea id="editor" spellcheck="false"># Static site: Route53 -> CloudFront (HTTPS) -> S3.
+# The arrows are the point: each one is an IAM policy or a service
+# integration the edge already knows how to provision.
+#
+#   cert -> hz      DNS validation records, automatically
+#   cf -> bucket    an OAC bucket policy: only this distribution can read
+#   cf -> hz        the A alias record for the domain
+#
+# cert_arn: cert.arn is a DATA DEPENDENCY (dashed in the diagram) — the
+# planner resolves it from live state, and everything downstream stays
+# BLOCKED until the certificate is ISSUED. No phase logic in the source.
+
+domain = "begrif.co"
+
+hz     : HostedZone(domain_name: domain)
+cert   : ACMCertificate(domain_name: domain)
+bucket : S3Bucket("begrif-co-site")
+cf     : CloudFrontDistribution(domain_name: domain, cert_arn: cert.arn)
+
+cert -> hz
+cf   -> bucket
+cf   -> hz : (domain_name: domain)
+</textarea>
+      <div class="controls">
+        <button id="desugarBtn" class="ghost" title="show this source with every lens resolved — constants substituted, names explicit, every edge type written out">⇄ desugar</button>
+        <span id="serverBar" hidden>
+          <button id="saveBtn" class="ghost" title="write the source back to the .giac file">💾 save</button>
+          <button id="planBtn" title="diff code / state DB / live AWS">▷ plan</button>
+          <button id="runBtn" title="apply the plan to AWS">▶ run</button>
+          <button id="verifyBtn" class="ghost" title="audit live AWS state">✓ verify</button>
+        </span>
+        <span id="status">ready</span>
+      </div>
+      <pre id="issues" hidden></pre>
+      <pre id="oplog" hidden></pre>
+      <pre id="desugared" hidden></pre>
+    </div>
+
+    <div class="col">
+      <div class="panel-label"><span>Graph</span><span class="hint">nodes are resources · edges are the wiring</span></div>
+      <div class="view">
+        <div class="cap"><span><b>solid</b> = provisioned connection</span><span>dashed = data dependency (blocks until resolvable)</span></div>
+        <svg id="graph"></svg>
+      </div>
+    </div>
+  </div>
+
+<script src="registry.js"></script>
+<script src="graphiac.js"></script>
+<script>
+"use strict";
+const K = window.GraphIaCDSL;
+const REG = window.GraphIaCRegistry;
+const editor = document.getElementById("editor");
+const statusEl = document.getElementById("status");
+const issuesEl = document.getElementById("issues");
+const svg = document.getElementById("graph");
+const NS = "http://www.w3.org/2000/svg";
+
+/* one color per AWS service, klangbild palette */
+const SERVICE_COLORS = [
+  [/^S3/, "#1f7a6d"],
+  [/^CloudFront/, "#c8451f"],
+  [/^(HostedZone|Route53)/, "#3d7fa6"],
+  [/^ACM/, "#b98a1d"],
+  [/^IAM/, "#7a4fa0"],
+  [/^Lambda/, "#5a7a1f"],
+  [/^Api/, "#8a2f5c"],
+];
+const FALLBACK = ["#c8451f", "#1f7a6d", "#3d7fa6", "#b98a1d", "#7a4fa0", "#5a7a1f"];
+const fbMap = new Map();
+function colorOf(type) {
+  for (const [re, c] of SERVICE_COLORS) if (re.test(type)) return c;
+  if (!fbMap.has(type)) fbMap.set(type, FALLBACK[fbMap.size % FALLBACK.length]);
+  return fbMap.get(type);
+}
+
+let current = null;   // last parse result
+const OPS = new Map(); // label -> last plan/run op, badged onto the diagram
+const OP_SYM = { create: "+", create_edge: "+", update: "~", "delete": "-", "import": "↳", blocked: "⊘" };
+const OP_COLOR = { create: "#1f7a6d", create_edge: "#1f7a6d", update: "#b98a1d",
+  "delete": "#c8451f", "import": "#3d7fa6", blocked: "rgba(34,48,74,0.45)" };
+
+/* ---- parse + draw on every edit ---- */
+function refresh() {
+  OPS.clear();         // the source changed — any previous plan is stale
+  current = K.parse(editor.value, REG);
+  const { graph, errors, warnings } = current;
+  if (errors.length) {
+    statusEl.textContent = "line " + errors[0].line + ": " + errors[0].msg;
+    statusEl.className = "err";
+  } else {
+    const refs = K.refsOf(graph).length;
+    statusEl.textContent = graph.nodes.length + " node" + (graph.nodes.length === 1 ? "" : "s")
+      + " · " + graph.edges.length + " edge" + (graph.edges.length === 1 ? "" : "s")
+      + (refs ? " · " + refs + " data dep" + (refs === 1 ? "" : "s") : "");
+    statusEl.className = "";
+  }
+  const issues = [...errors.map(e => ({ ...e, k: "e" })), ...warnings.map(w => ({ ...w, k: "w" }))]
+    .sort((a, b) => a.line - b.line);
+  issuesEl.hidden = !issues.length;
+  issuesEl.innerHTML = issues.map(i =>
+    `<span class="${i.k}">${i.k === "e" ? "✗" : "⚠"} line ${i.line}</span>  ${esc(i.msg)}`).join("\n");
+  drawGraph(graph);
+  renderDesugar();
+}
+editor.addEventListener("input", refresh);
+function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+
+/* ---- desugar panel ---- */
+const dsBtn = document.getElementById("desugarBtn");
+const dsPanel = document.getElementById("desugared");
+dsBtn.addEventListener("click", () => { dsPanel.hidden = !dsPanel.hidden; renderDesugar(); });
+function renderDesugar() {
+  if (dsPanel.hidden || !current) return;
+  dsPanel.textContent = current.errors.length
+    ? "(fix the errors above first)"
+    : K.desugar(current.graph, REG);
+}
+
+/* ---- layout: longest-path layering, left -> right ----
+ * Both solid edges and dashed refs are dependencies for placement, so
+ * data flows the same direction the eye reads. */
+function layout(graph) {
+  const layer = new Map(graph.nodes.map(n => [n.g_id, 0]));
+  const deps = [];
+  for (const e of graph.edges) {
+    const reg = REG.edges[e.type];
+    deps.push([e.fields[reg.source.field], e.fields[reg.dest.field]]);
+  }
+  for (const r of K.refsOf(graph)) if (r.to) deps.push([r.from, r.to]);
+  for (let i = 0; i < graph.nodes.length + 1; i++) {          // relaxation, cycle-capped
+    let moved = false;
+    for (const [u, v] of deps) {
+      if (!layer.has(u) || !layer.has(v)) continue;
+      if (layer.get(v) < layer.get(u) + 1) { layer.set(v, layer.get(u) + 1); moved = true; }
+    }
+    if (!moved) break;
+  }
+  const cols = [];
+  for (const n of graph.nodes) {
+    const l = layer.get(n.g_id);
+    (cols[l] = cols[l] || []).push(n);
+  }
+  return cols.filter(Boolean);
+}
+
+const BOX_W = 172, BOX_H = 50;
+
+function drawGraph(graph) {
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const r = svg.getBoundingClientRect();
+  const W = Math.max(r.width, 300), H = Math.max(r.height, 200);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+
+  // arrowheads
+  const defs = el("defs", {});
+  defs.appendChild(marker("arr", "rgba(34,48,74,0.75)"));
+  defs.appendChild(marker("arrRef", "#1f7a6d"));
+  defs.appendChild(marker("arrBlocked", "rgba(34,48,74,0.3)"));
+  svg.appendChild(defs);
+
+  if (!graph.nodes.length) {
+    svg.appendChild(el("text", { x: W / 2, y: H / 2, "text-anchor": "middle",
+      fill: "rgba(34,48,74,0.4)", "font-size": 12, "font-family": "var(--mono)" },
+      "declare a node:  label : Type(…)"));
+    return;
+  }
+
+  const cols = layout(graph);
+  const pos = new Map();
+  const colW = Math.max(BOX_W + 60, (W - 40) / cols.length);
+  cols.forEach((col, ci) => {
+    const rowH = H / col.length;
+    col.forEach((n, ri) => {
+      pos.set(n.g_id, { x: 24 + ci * colW, y: rowH * (ri + 0.5) - BOX_H / 2 });
+    });
+  });
+
+  // solid edges — the provisioned wiring (greyed out when the plan says BLOCKED)
+  for (const e of graph.edges) {
+    const reg = REG.edges[e.type];
+    const src = e.fields[reg.source.field], dst = e.fields[reg.dest.field];
+    const a = pos.get(src), b = pos.get(dst);
+    if (!a || !b) continue;
+    const isBlocked = OPS.get(`${src} → ${dst}`) === "blocked";
+    drawArrow(a, b, {
+      stroke: isBlocked ? "rgba(34,48,74,0.3)" : "rgba(34,48,74,0.75)",
+      dash: isBlocked ? "5 4" : null, markerId: isBlocked ? "arrBlocked" : "arr",
+      label: e.type.replace(/Edge$/, ""),
+      labelColor: isBlocked ? "rgba(34,48,74,0.4)" : "#c8451f",
+      title: e.type + "\n" + JSON.stringify(e.fields, null, 1),
+    });
+  }
+  // dashed refs — data dependencies
+  for (const ref of K.refsOf(graph)) {
+    if (!ref.to) continue;
+    const a = pos.get(ref.from), b = pos.get(ref.to);
+    if (!a || !b) continue;
+    drawArrow(a, b, {
+      stroke: "#1f7a6d", dash: "5 4", markerId: "arrRef",
+      label: "." + ref.field, labelColor: "#1f7a6d",
+      title: ref.to + " waits on " + ref.from + "." + ref.field,
+    });
+  }
+
+  // nodes on top — badged with the last plan's verdict for them
+  for (const n of graph.nodes) {
+    const p = pos.get(n.g_id), c = colorOf(n.type);
+    const op = OPS.get(n.g_id);
+    const blockedNode = op === "blocked";
+    const g = el("g", {});
+    if (blockedNode) g.setAttribute("opacity", "0.7");
+    const box = el("rect", { x: p.x, y: p.y, width: BOX_W, height: BOX_H, rx: 3,
+      fill: "#fbf8ef", stroke: blockedNode ? "rgba(34,48,74,0.35)" : c, "stroke-width": 2 });
+    if (blockedNode) box.setAttribute("stroke-dasharray", "6 4");
+    g.appendChild(box);
+    g.appendChild(el("rect", { x: p.x, y: p.y, width: 5, height: BOX_H,
+      fill: blockedNode ? "rgba(34,48,74,0.35)" : c }));
+    g.appendChild(el("text", { x: p.x + 14, y: p.y + 21, fill: "#22304a",
+      "font-size": 13, "font-weight": "bold", "font-family": "var(--mono)" }, n.g_id));
+    g.appendChild(el("text", { x: p.x + 14, y: p.y + 38, fill: "rgba(34,48,74,0.55)",
+      "font-size": 10, "font-family": "var(--mono)" }, n.type));
+    if (op) {
+      g.appendChild(el("text", { x: p.x + BOX_W - 7, y: p.y + 17, "text-anchor": "end",
+        fill: OP_COLOR[op] || "#22304a", "font-size": 12, "font-weight": "bold",
+        "font-family": "var(--mono)" }, OP_SYM[op] || "·"));
+    }
+    const t = el("title", {},
+      n.g_id + " : " + n.type + "\n" + JSON.stringify(n.fields, null, 1));
+    g.appendChild(t);
+    svg.appendChild(g);
+  }
+}
+
+function drawArrow(a, b, opt) {
+  const x1 = a.x + BOX_W, y1 = a.y + BOX_H / 2;
+  const x2 = b.x - 6, y2 = b.y + BOX_H / 2;
+  const mx = (x1 + x2) / 2;
+  const d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+  const g = el("g", {});
+  const path = el("path", { d, fill: "none", stroke: opt.stroke, "stroke-width": 1.6,
+    "marker-end": `url(#${opt.markerId})` });
+  if (opt.dash) path.setAttribute("stroke-dasharray", opt.dash);
+  g.appendChild(path);
+  if (opt.label) {
+    g.appendChild(el("text", { x: mx, y: (y1 + y2) / 2 - 5, "text-anchor": "middle",
+      fill: opt.labelColor, "font-size": 9, "font-family": "var(--mono)",
+      stroke: "#fbf8ef", "stroke-width": 3, "paint-order": "stroke" }, opt.label));
+  }
+  if (opt.title) g.appendChild(el("title", {}, opt.title));
+  svg.appendChild(g);
+}
+
+function marker(id, color) {
+  const m = el("marker", { id, viewBox: "0 0 10 10", refX: 9, refY: 5,
+    markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" });
+  m.appendChild(el("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: color }));
+  return m;
+}
+
+function el(tag, attrs, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+window.addEventListener("resize", () => current && drawGraph(current.graph));
+refresh();
+
+/* =====================================================================
+ * SERVER MODE — when served by `python -m GraphIaC … serve`, the editor
+ * becomes the control panel: save the source, plan, run, verify. Opened
+ * as a plain file, none of this exists and the page stays a sandbox.
+ * =================================================================== */
+const serverBar = document.getElementById("serverBar");
+const oplog = document.getElementById("oplog");
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, data: await res.json() };
+}
+
+(async function detectServer() {
+  try {
+    const { status, data } = await api("/api/source");
+    if (status !== 200) return;
+    if (data.source && data.source.trim()) editor.value = data.source;
+    serverBar.hidden = false;
+    refresh();
+  } catch (e) { /* file:// — sandbox only, no controls */ }
+})();
+
+function logLines(lines) { oplog.hidden = false; oplog.innerHTML = lines.join("\n"); }
+function opLine(o) {
+  const reason = o.reason ? `  — ${esc(o.reason)}` : "";
+  return `<span class="op-${o.op}">${OP_SYM[o.op] || "·"} ${esc(o.type)} [${esc(o.label)}]${reason}</span>`;
+}
+
+async function engine(path, waitMsg) {
+  logLines([waitMsg + "…"]);
+  try {
+    const { status, data } = await api(path, { source: editor.value });
+    if (data.errors) {
+      logLines(data.errors.map(e => `<span class="fail">✗ line ${e.line}: ${esc(e.msg)}</span>`));
+      return;
+    }
+    if (data.error) {
+      logLines([`<span class="${status === 409 ? "op-update" : "fail"}">✗ ${esc(data.error)}</span>`]);
+      return;
+    }
+    const ops = data.ops || data.applied || [];
+    OPS.clear();
+    for (const o of ops) OPS.set(o.label, o.op);
+    drawGraph(current.graph);
+    logLines(ops.length ? ops.map(opLine)
+      : [`<span class="ok">✓ no changes — infrastructure is up to date</span>`]);
+  } catch (e) {
+    logLines([`<span class="fail">✗ ${esc(String(e))}</span>`]);
+  }
+}
+
+document.getElementById("planBtn").addEventListener("click", () => engine("/api/plan", "planning"));
+document.getElementById("runBtn").addEventListener("click", () => {
+  if (confirm("Apply this plan to AWS?")) engine("/api/run", "applying");
+});
+document.getElementById("saveBtn").addEventListener("click", async () => {
+  const { data } = await api("/api/source", { source: editor.value });
+  statusEl.textContent = data.saved ? "saved → " + data.path : "save failed";
+});
+document.getElementById("verifyBtn").addEventListener("click", async () => {
+  logLines(["verifying…"]);
+  try {
+    const { data } = await api("/api/verify", { source: editor.value });
+    if (data.errors || data.error) {
+      logLines([`<span class="fail">✗ ${esc(JSON.stringify(data.errors || data.error))}</span>`]);
+      return;
+    }
+    const lines = data.checks.map(c =>
+      `<span class="${c.passed ? "ok" : "fail"}">${c.passed ? "✓" : "✗"} ${esc(c.label)} — ${esc(c.name)}${c.message ? ": " + esc(c.message) : ""}</span>`);
+    lines.push(data.failed
+      ? `<span class="fail">${data.failed} check${data.failed === 1 ? "" : "s"} failed</span>`
+      : `<span class="ok">all checks passed</span>`);
+    logLines(lines);
+  } catch (e) {
+    logLines([`<span class="fail">✗ ${esc(String(e))}</span>`]);
+  }
+});
+</script>
+</body>
+</html>

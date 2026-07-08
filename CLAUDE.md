@@ -131,6 +131,20 @@ The `read()` classmethod searches AWS by domain name when no ARN is provided yet
 
 Maps string type names to classes. Required so the DB layer can deserialize stored JSON back into the correct Pydantic model type. **When adding a new node or edge class, register it here.**
 
+### The DSL and Browser Sandbox (`dsl/`, `src/GraphIaC/web/`)
+
+A small declarative language over nodes and edges — spec in `dsl/spec.md`. The DSL is purely a frontend: it parses down to the same flat node/edge structure the engine consumes. Key pieces:
+
+- `src/GraphIaC/web/graphiac.js` — the pure JS parser core (UMD, no DOM, no AWS knowledge) powering the live editor.
+- `src/GraphIaC/dsl.py` — the Python parser, the engine's side of the language. The two are deliberate twins: same grammar, same graph JSON, same error wording, byte-identical `desugar()` output. **When changing one parser, change the other** — both must satisfy the shared fixture corpus in `dsl/fixtures/` (`*.giac` source → expected `*.json` parse result).
+- `src/GraphIaC/web/registry.js` — GENERATED. All AWS type knowledge for the JS parser, introspected from the Pydantic models. Regenerate after changing any model or `model_map.py`: `python -m GraphIaC.dsl_registry`. The name-field and edge-endpoint tables live in `dsl_registry.py`; new node/edge classes must be added there too to be usable from the DSL.
+- `src/GraphIaC/web/index.html` — the live sandbox (editor + graph diagram + desugar). Open directly in a browser; no build step, no npm — keep it that way. Shipped inside the wheel as package data.
+- `dsl.load_graph(state, graph)` — instantiates a parsed graph into a `GraphIaCState`, resolving attribute references (`$ref`) from live AWS state. Unresolvable refs make the node — and everything touching it — **BLOCKED**: reported by `plan(state, blocked=...)`, skipped by `run`, shielded from orphan deletion, and picked up automatically on a later run once the upstream is ready (gated by each node's `ready()`, e.g. ACM cert must be ISSUED). This replaces the two-phase pattern for DSL infra.
+- CLI: `.giac` files work anywhere `.py` infra files do — `python -m GraphIaC <profile> --infra_file site.giac plan|run|verify|diagram`.
+- `src/GraphIaC/server.py` — the backend server, hand-rolled on `http.server` (no framework, by design). `python -m GraphIaC <profile> --infra_file site.giac serve` serves the sandbox at `127.0.0.1:8642` with a JSON API (`GET/POST /api/source`, `POST /api/plan|run|verify`); the editor becomes a live control panel (save/plan/run/verify buttons, plan verdicts badged onto the diagram, BLOCKED nodes greyed out). The `Api` class is transport-agnostic — dicts in, `(status, dict)` out — so the future Lambda-hosted deployment reuses it verbatim. No auth yet: it binds localhost only; keep it that way until Cognito lands.
+
+Run the DSL tests: `pytest tests/test_dsl.py tests/test_dsl_load.py` and `node --test src/GraphIaC/web/`
+
 ### Logging (`src/GraphIaC/logs.py`)
 
 Shared `colorlog` setup. Call `setup_logger()` in new modules rather than calling `logging` directly.

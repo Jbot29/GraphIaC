@@ -17,6 +17,16 @@ class BaseNode(BaseModel):
     def read_id(self) -> Optional[str]:
         return None
 
+    def ready(self) -> bool:
+        """Is this resource usable by things that depend on it?
+
+        The DSL planner gates attribute references (other.field) on the
+        referenced node's live state being ready(); until then dependents
+        are BLOCKED. Override for resources with a not-yet-usable phase
+        (e.g. an ACM certificate that exists but is not ISSUED).
+        """
+        return True
+
     @classmethod
     def read(self, session, G, g_id, read_id):
         pass
