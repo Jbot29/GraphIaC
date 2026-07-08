@@ -135,11 +135,12 @@ Maps string type names to classes. Required so the DB layer can deserialize stor
 
 A small declarative language over nodes and edges — spec in `dsl/spec.md`. The DSL is purely a frontend: it parses down to the same flat node/edge structure the engine consumes. Key pieces:
 
-- `src/GraphIaC/web/graphiac.js` — the pure JS parser core (UMD, no DOM, no AWS knowledge). A Python parser will follow; both must satisfy the shared fixture corpus in `dsl/fixtures/` (`*.giac` source → expected `*.json` parse result).
+- `src/GraphIaC/web/graphiac.js` — the pure JS parser core (UMD, no DOM, no AWS knowledge) powering the live editor.
+- `src/GraphIaC/dsl.py` — the Python parser, the engine's side of the language. The two are deliberate twins: same grammar, same graph JSON, same error wording, byte-identical `desugar()` output. **When changing one parser, change the other** — both must satisfy the shared fixture corpus in `dsl/fixtures/` (`*.giac` source → expected `*.json` parse result).
 - `src/GraphIaC/web/registry.js` — GENERATED. All AWS type knowledge for the JS parser, introspected from the Pydantic models. Regenerate after changing any model or `model_map.py`: `python -m GraphIaC.dsl_registry`. The name-field and edge-endpoint tables live in `dsl_registry.py`; new node/edge classes must be added there too to be usable from the DSL.
 - `src/GraphIaC/web/index.html` — the live sandbox (editor + graph diagram + desugar). Open directly in a browser; no build step, no npm — keep it that way. Shipped inside the wheel as package data.
 
-Run the DSL tests: `node --test src/GraphIaC/web/`
+Run the DSL tests: `pytest tests/test_dsl.py` and `node --test src/GraphIaC/web/`
 
 ### Logging (`src/GraphIaC/logs.py`)
 

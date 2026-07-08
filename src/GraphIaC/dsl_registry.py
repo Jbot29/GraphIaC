@@ -73,9 +73,13 @@ return """
 
 
 def _field_info(model_cls):
-    """Introspect a Pydantic model's fields into plain JSON-able metadata."""
+    """Introspect a Pydantic model's fields into plain JSON-able metadata.
+
+    Fields are sorted so both parsers iterate (and so error-emit) in the
+    same order — the generated registry.js is JSON-dumped with sorted keys.
+    """
     fields = {}
-    for fname, f in model_cls.model_fields.items():
+    for fname, f in sorted(model_cls.model_fields.items()):
         if fname == "g_id":
             continue  # set from the label, never a DSL arg
         info = {"required": f.is_required()}
@@ -92,7 +96,7 @@ def _field_info(model_cls):
 
 def build_registry():
     nodes, edges = {}, {}
-    for type_name, cls in BASE_MODEL_MAP.items():
+    for type_name, cls in sorted(BASE_MODEL_MAP.items()):
         if issubclass(cls, BaseNode):
             nodes[type_name] = {
                 "nameField": NAME_FIELDS.get(type_name),
@@ -100,7 +104,7 @@ def build_registry():
             }
         elif issubclass(cls, BaseEdge):
             if type_name not in EDGE_ENDPOINTS:
-                logger.info(f"edge {type_name} has no EDGE_ENDPOINTS entry — not usable from the DSL")
+                logger.debug(f"edge {type_name} has no EDGE_ENDPOINTS entry — not usable from the DSL")
                 continue
             src_type, src_field, dst_type, dst_field = EDGE_ENDPOINTS[type_name]
             edges[type_name] = {
