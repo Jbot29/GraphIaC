@@ -11,8 +11,8 @@ from .logs import setup_logger
 
 logger = setup_logger()
 
-# logging.basicConfig(encoding='utf-8', level=logging.INFO)
-# python -m a
+# python -m GraphIaC <profile> --infra_file infra.py plan
+# python -m GraphIaC <profile> --infra_file site.giac plan
 
 
 def load_user_infra_module(file_path):
@@ -24,31 +24,33 @@ def load_user_infra_module(file_path):
     return module
 
 
-def plan(profile, db_conn, user_infra_module):
-    logger.info("GraphIOC: Plan")
+def load_infra(gioc, path):
+    """Populate state from an infra file — a Python module or a .giac DSL
+    source (see dsl/spec.md). Returns the list of BLOCKED items (always
+    empty for Python infra, which does its own phase logic)."""
+    if path.endswith(".giac"):
+        from GraphIaC import dsl
 
-    session = boto3.session.Session(profile_name=profile)
+        with open(path) as f:
+            res = dsl.parse(f.read())
+        for w in res["warnings"]:
+            logger.warning(f"{path}:{w['line']}: {w['msg']}")
+        if res["errors"]:
+            for e in res["errors"]:
+                logger.error(f"{path}:{e['line']}: {e['msg']}")
+            raise SystemExit(1)
+        return dsl.load_graph(gioc, res["graph"])
 
-    gioc = GraphIaC.init(session, db_conn)
-
-    user_infra_module.infra(gioc)
-
-    changes = GraphIaC.plan(gioc)
-
-    logger.info("Changes:")
-    for change in changes:
-        logger.info(f"\tChange: {change.operation} {change.obj}")
-
-    return
+    module = load_user_infra_module(path)
+    module.infra(gioc)
+    return []
 
 
 def main():
-    # Set up argument parsing
     parser = argparse.ArgumentParser(description="Infrastructure tool")
 
     parser.add_argument("profile", help="Aws Profile to use")
-    parser.add_argument("--infra_file", help="Path to the user's infrastructure definition file")
-    # parser.add_argument('version',help="Version")
+    parser.add_argument("--infra_file", help="Path to the infrastructure definition (.py or .giac)")
     parser.add_argument(
         "command",
         choices=["plan", "run", "diagram", "verify"],
@@ -57,54 +59,36 @@ def main():
 
     args = parser.parse_args()
 
-    user_module_path = ""
-
-    # Load the user's infrastructure file
-    if args.infra_file:
-        user_module_path = args.infra_file
-    else:
+    if not args.infra_file:
         print("Infra file needed")
         return
 
-    user_infra_module = load_user_infra_module(user_module_path)
+    base = os.path.splitext(args.infra_file)[0]
+    db_conn = sqlite3.connect(base + ".db")
 
-    db_path = user_module_path.replace(".py", ".db")
-
-    diagram_path = user_module_path.replace(".py", "")
-
-    db_conn = sqlite3.connect(db_path)
-
-    # Execute the specified command
-    if args.command == "plan":
-        logger.plan("Plan")
-
-        plan(args.profile, db_conn, user_infra_module)
-
-        return
-
-    print(args.profile)
     session = boto3.session.Session(profile_name=args.profile)
     gioc = GraphIaC.init(session, db_conn)
+    blocked = load_infra(gioc, args.infra_file)
 
-    if args.command == "run":
-        user_infra_module.infra(gioc)
-        GraphIaC.run(gioc)
-        return
+    if args.command == "plan":
+        logger.plan("Plan")
+        changes = GraphIaC.plan(gioc, blocked)
+        logger.info("Changes:")
+        for change in changes:
+            logger.info(f"\tChange: {change.operation} {change.obj}")
+
+    elif args.command == "run":
+        GraphIaC.run(gioc, blocked)
 
     elif args.command == "verify":
-        user_infra_module.infra(gioc)
         failed = GraphIaC.verify(gioc)
         raise SystemExit(1 if failed else 0)
 
     elif args.command == "diagram":
         print("Diagram")
-
-        gioc = GraphIaC.init(session, db_path)
-        user_infra_module.infra(gioc)
         print(gioc.G)
+        GraphIaC.export_graph(gioc, base)
 
-        GraphIaC.export_graph(gioc, diagram_path)
-        # GraphIOC.plan(gioc)
     else:
         print(f"Unknown command: {args.command}")
 

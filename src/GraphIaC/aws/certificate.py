@@ -19,6 +19,11 @@ class ACMCertificate(BaseNode):
         # Prefer ARN for direct lookup; fall back to domain name search
         return self.arn if self.arn else self.domain_name
 
+    def ready(self) -> bool:
+        # A requested-but-unvalidated cert exists but can't be attached to
+        # anything yet — dependents ($refs to cert.arn) stay BLOCKED until ISSUED.
+        return self.status == "ISSUED"
+
     @classmethod
     def read(cls, session, G, g_id, read_id, **kwargs):
         # When called from infra.py with read_id=None, fall back to domain_name from graph

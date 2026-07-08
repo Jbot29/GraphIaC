@@ -27,6 +27,8 @@ All AWS knowledge comes from the registry (dsl_registry.build_registry).
 
 import re
 
+from pydantic import BaseModel
+
 from GraphIaC.dsl_registry import build_registry
 
 VERSION = "0.1"
@@ -627,3 +629,129 @@ def refs_of(graph):
     for e in graph["edges"]:
         walk(e["fields"], lambda r, e=e: refs.append({"from": r["g_id"], "to": None, "field": r["field"], "edge": e}))
     return refs
+
+
+# ---------------------------------------------------------------------
+# LOAD — a parsed graph into a GraphIaCState: instantiate the Pydantic
+# models and add them to state.G, resolving every $ref from live AWS
+# state on the way. This is where the two-phase pattern becomes the
+# planner's problem instead of the author's:
+#
+#   - a $ref resolves only if the referenced node exists live, its
+#     ready() is True, and the referenced field has a value
+#   - otherwise the referencing node is BLOCKED — it (and every edge
+#     touching it) is left out of the graph and reported instead, so
+#     plan/run simply act on what's actionable and pick the rest up on
+#     a later run
+# ---------------------------------------------------------------------
+class BlockedItem(BaseModel):
+    """A node or edge left out of this run, and why. plan() reports these
+    and shields their DB rows from orphan deletion."""
+
+    g_id: str
+    type: str
+    reason: str
+
+
+class _Blocked(Exception):
+    def __init__(self, reason):
+        self.reason = reason
+
+
+def _collect_refs(v, out):
+    if isinstance(v, dict):
+        if "$ref" in v:
+            out.append(v["$ref"])
+        else:
+            for e in v.values():
+                _collect_refs(e, out)
+    elif isinstance(v, list):
+        for e in v:
+            _collect_refs(e, out)
+    return out
+
+
+def _substitute(v, resolve_ref):
+    if isinstance(v, dict):
+        if "$ref" in v:
+            return resolve_ref(v["$ref"])  # may raise _Blocked
+        return {k: _substitute(e, resolve_ref) for k, e in v.items()}
+    if isinstance(v, list):
+        return [_substitute(e, resolve_ref) for e in v]
+    return v
+
+
+def load_graph(state, graph):
+    """Instantiate a parsed DSL graph into `state` (a GraphIaCState).
+
+    Adds every resolvable node and edge to state.G via the normal
+    add_node/add_edge path, exactly as a Python infra.py would. Returns
+    the list of BlockedItem for everything that couldn't be — pass it to
+    plan(state, blocked=...) / run(state, blocked=...).
+    """
+    from GraphIaC.main import add_edge, add_node
+
+    blocked = []
+    blocked_ids = set()
+    models = {}
+    live_cache = {}
+
+    def resolve_ref(ref):
+        g_id, field = ref["g_id"], ref["field"]
+        target = models.get(g_id)
+        if target is None:
+            raise _Blocked(f'waiting on "{g_id}" — {"blocked itself" if g_id in blocked_ids else "unknown node"}')
+        if g_id not in live_cache:
+            live_cache[g_id] = target.read(state.session, state.G, g_id, target.read_id)
+        live = live_cache[g_id]
+        if live is None:
+            raise _Blocked(f'waiting on "{g_id}" — not created yet')
+        if not live.ready():
+            raise _Blocked(f'waiting on "{g_id}" — exists but not ready')
+        val = getattr(live, field, None)
+        if val is None:
+            raise _Blocked(f'waiting on "{g_id}.{field}" — no value yet')
+        return val
+
+    # nodes: fixpoint iteration so ref targets instantiate before referrers,
+    # regardless of declaration order
+    pending = {n["g_id"]: n for n in graph["nodes"]}
+    while pending:
+        progress = False
+        for g_id, n in list(pending.items()):
+            refs = _collect_refs(n["fields"], [])
+            if any(r["g_id"] in pending and r["g_id"] != g_id for r in refs):
+                continue  # a ref target hasn't been decided yet — come back to this one
+            del pending[g_id]
+            progress = True
+            try:
+                if any(r["g_id"] == g_id for r in refs):
+                    raise _Blocked(f'"{g_id}" references itself')
+                fields = _substitute(n["fields"], resolve_ref)
+                model = state.models_map[n["type"]](g_id=g_id, **fields)
+                models[g_id] = model
+                add_node(state, model)
+            except _Blocked as b:
+                blocked.append(BlockedItem(g_id=g_id, type=n["type"], reason=b.reason))
+                blocked_ids.add(g_id)
+        if not progress:  # only circular references remain
+            for g_id, n in pending.items():
+                blocked.append(BlockedItem(g_id=g_id, type=n["type"], reason="circular attribute references"))
+                blocked_ids.add(g_id)
+            break
+
+    # edges: blocked if their fields can't resolve or either endpoint is blocked
+    for e in graph["edges"]:
+        label = e["type"]
+        try:
+            fields = _substitute(e["fields"], resolve_ref)
+            edge = state.models_map[e["type"]](**fields)
+            label = f"{edge.source_g_id} → {edge.destination_g_id}"
+            for endpoint in (edge.source_g_id, edge.destination_g_id):
+                if endpoint in blocked_ids:
+                    raise _Blocked(f'waiting on blocked node "{endpoint}"')
+            add_edge(state, edge)
+        except _Blocked as b:
+            blocked.append(BlockedItem(g_id=label, type=e["type"], reason=b.reason))
+
+    return blocked
