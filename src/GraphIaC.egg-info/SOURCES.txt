@@ -4,6 +4,7 @@ pyproject.toml
 src/GraphIaC/__init__.py
 src/GraphIaC/__main__.py
 src/GraphIaC/db.py
+src/GraphIaC/dsl_registry.py
 src/GraphIaC/logs.py
 src/GraphIaC/main.py
 src/GraphIaC/model_map.py
@@ -31,6 +32,10 @@ src/GraphIaC/aws/types.py
 src/GraphIaC/aws/ec2/alb.py
 src/GraphIaC/aws/ec2/listener.py
 src/GraphIaC/aws/ec2/target_group.py
+src/GraphIaC/web/graphiac.js
+src/GraphIaC/web/graphiac.test.js
+src/GraphIaC/web/index.html
+src/GraphIaC/web/registry.js
 src/GraphIac/__init__.py
 src/GraphIac/__main__.py
 src/GraphIac/db.py
