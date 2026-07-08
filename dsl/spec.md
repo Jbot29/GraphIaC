@@ -189,6 +189,25 @@ always declared; readiness is the planner's problem, not the author's.
 
 ---
 
+## Files — code rides along
+
+Some fields *are* code — a CloudFront function's JavaScript, a policy
+document. The DSL has no multiline strings; code lives in its own file,
+next to the source, and is referenced:
+
+```
+fn : CloudFrontFunction(name: "url-rewrite", function_code: file("url-rewrite.js"))
+```
+
+`file(...)` takes one quoted path, relative to the `.giac` source file.
+Parsing never touches the disk — the value stays symbolic (`$file`) in the
+graph, so the browser sandbox works without filesystem access; the
+**engine** reads the file at load time. A missing file is an authoring
+error (load fails), not a BLOCKED.
+
+`file` is only special immediately before `(` — it remains usable as a
+label or constant name.
+
 ## BLOCKED — the planner handles time
 
 Some resources take hours to become usable (ACM certificate validation is the

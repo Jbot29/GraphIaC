@@ -165,6 +165,20 @@ def test_self_ref_blocks(state):
     assert "references itself" in blocked[0].reason
 
 
+def test_file_values_resolve_at_load_time(state, tmp_path):
+    (tmp_path / "code.js").write_text("function handler(e) { return e.request; }")
+    g = graph([node("a", {"dep_arn": {"$file": {"path": "code.js"}}})])
+    blocked = dsl.load_graph(state, g, base_dir=tmp_path)
+    assert blocked == []
+    assert state.G.nodes["a"]["data"].dep_arn == "function handler(e) { return e.request; }"
+
+
+def test_missing_file_raises_not_blocks(state, tmp_path):
+    g = graph([node("a", {"dep_arn": {"$file": {"path": "nope.js"}}})])
+    with pytest.raises(FileNotFoundError, match="nope.js"):
+        dsl.load_graph(state, g, base_dir=tmp_path)
+
+
 # ---------------------------------------------------------------------
 # the planner: BLOCKED operations and delete protection
 # ---------------------------------------------------------------------

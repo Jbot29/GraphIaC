@@ -252,6 +252,21 @@ class _Scanner:
         if ident:
             if ident in ("true", "false"):
                 return {"t": "bool", "v": ident == "true"}
+            if ident == "file" and self.at() == "(":
+                self.i += 1
+                self.ws()
+                if self.at() != '"':
+                    self.err(self.ln, 'file(...) takes a quoted path — e.g. file("handler.js")')
+                    return None
+                p = self._string()
+                if p is None:
+                    return None
+                self.ws()
+                if self.at() != ")":
+                    self.err(self.ln, "expected ) after file path")
+                    return None
+                self.i += 1
+                return {"t": "fileval", "path": p["v"]}
             if self.at() == ".":
                 self.i += 1
                 f = self.ident()
@@ -360,6 +375,10 @@ def parse(src, registry=None):
                     return _FAIL
                 out[k] = r
             return out
+        if t == "fileval":
+            # stays symbolic — load_graph reads the file, relative to the
+            # source file's directory; parse never touches the disk
+            return {"$file": {"path": v["path"]}}
         if t == "ident":
             if v["v"] in consts:
                 return consts[v["v"]]
@@ -575,6 +594,9 @@ def _fmt_value(v):
         return "[" + ", ".join(_fmt_value(e) for e in v) + "]"
     if isinstance(v, dict) and "$ref" in v:
         return f'{v["$ref"]["g_id"]}.{v["$ref"]["field"]}'
+    if isinstance(v, dict) and "$file" in v:
+        path = v["$file"]["path"].replace("\\", "\\\\").replace('"', '\\"')
+        return f'file("{path}")'
     if isinstance(v, dict):
         return "{" + ", ".join(f"{k}: {_fmt_value(e)}" for k, e in v.items()) + "}"
     return str(v)
@@ -671,30 +693,45 @@ def _collect_refs(v, out):
     return out
 
 
-def _substitute(v, resolve_ref):
+def _substitute(v, resolve_ref, resolve_file):
     if isinstance(v, dict):
         if "$ref" in v:
             return resolve_ref(v["$ref"])  # may raise _Blocked
-        return {k: _substitute(e, resolve_ref) for k, e in v.items()}
+        if "$file" in v:
+            return resolve_file(v["$file"])
+        return {k: _substitute(e, resolve_ref, resolve_file) for k, e in v.items()}
     if isinstance(v, list):
-        return [_substitute(e, resolve_ref) for e in v]
+        return [_substitute(e, resolve_ref, resolve_file) for e in v]
     return v
 
 
-def load_graph(state, graph):
+def load_graph(state, graph, base_dir=None):
     """Instantiate a parsed DSL graph into `state` (a GraphIaCState).
 
     Adds every resolvable node and edge to state.G via the normal
     add_node/add_edge path, exactly as a Python infra.py would. Returns
     the list of BlockedItem for everything that couldn't be — pass it to
     plan(state, blocked=...) / run(state, blocked=...).
+
+    `base_dir` anchors file("…") values — pass the directory of the .giac
+    source (defaults to the current working directory). A missing file
+    raises FileNotFoundError: that's an authoring error, not a BLOCKED.
     """
+    from pathlib import Path
+
     from GraphIaC.main import add_edge, add_node
 
+    base = Path(base_dir) if base_dir else Path.cwd()
     blocked = []
     blocked_ids = set()
     models = {}
     live_cache = {}
+
+    def resolve_file(fileref):
+        target = base / fileref["path"]
+        if not target.is_file():
+            raise FileNotFoundError(f'file("{fileref["path"]}") not found (looked in {base})')
+        return target.read_text()
 
     def resolve_ref(ref):
         g_id, field = ref["g_id"], ref["field"]
@@ -727,7 +764,7 @@ def load_graph(state, graph):
             try:
                 if any(r["g_id"] == g_id for r in refs):
                     raise _Blocked(f'"{g_id}" references itself')
-                fields = _substitute(n["fields"], resolve_ref)
+                fields = _substitute(n["fields"], resolve_ref, resolve_file)
                 model = state.models_map[n["type"]](g_id=g_id, **fields)
                 models[g_id] = model
                 add_node(state, model)
@@ -744,7 +781,7 @@ def load_graph(state, graph):
     for e in graph["edges"]:
         label = e["type"]
         try:
-            fields = _substitute(e["fields"], resolve_ref)
+            fields = _substitute(e["fields"], resolve_ref, resolve_file)
             edge = state.models_map[e["type"]](**fields)
             label = f"{edge.source_g_id} → {edge.destination_g_id}"
             for endpoint in (edge.source_g_id, edge.destination_g_id):

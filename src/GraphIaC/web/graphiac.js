@@ -167,6 +167,17 @@ function makeScanner(s, ln, err) {
     const id = ident();
     if (id) {
       if (id === "true" || id === "false") return { t: "bool", v: id === "true" };
+      if (id === "file" && s[i] === "(") {
+        i++;
+        ws();
+        if (s[i] !== '"') { err(ln, 'file(...) takes a quoted path — e.g. file("handler.js")'); return null; }
+        const p = string();
+        if (!p) return null;
+        ws();
+        if (s[i] !== ")") { err(ln, "expected ) after file path"); return null; }
+        i++;
+        return { t: "fileval", path: p.v };
+      }
       if (s[i] === ".") {
         i++;
         const f = ident();
@@ -297,6 +308,10 @@ function parse(src, registry) {
         for (const [k, e] of Object.entries(v.v)) { const r = resolve(e, ln, env); if (r === undefined) return undefined; out[k] = r; }
         return out;
       }
+      case "fileval":
+        // stays symbolic — the ENGINE reads the file at load time, relative
+        // to the source file; the browser only needs the reference
+        return { $file: { path: v.path } };
       case "ident": {
         if (env.consts.has(v.v)) return env.consts.get(v.v);
         if (env.nodes && env.nodes.has(v.v)) return v.v;   // a bare label means its g_id
@@ -432,6 +447,7 @@ function fmtValue(v) {
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   if (Array.isArray(v)) return "[" + v.map(fmtValue).join(", ") + "]";
   if (typeof v === "object" && v.$ref) return `${v.$ref.g_id}.${v.$ref.field}`;
+  if (typeof v === "object" && v.$file) return `file(${JSON.stringify(v.$file.path)})`;
   if (typeof v === "object") return "{" + Object.entries(v).map(([k, e]) => `${k}: ${fmtValue(e)}`).join(", ") + "}";
   return String(v);
 }

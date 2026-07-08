@@ -91,6 +91,21 @@ def test_duplicate_edge_warns_even_reversed():
     assert "duplicate edge" in res["warnings"][0]["msg"]
 
 
+def test_file_value_stays_symbolic():
+    res = dsl.parse('fn : CloudFrontFunction(function_code: file("f.js"))', REG)
+    assert res["errors"] == []
+    assert res["graph"]["nodes"][0]["fields"]["function_code"] == {"$file": {"path": "f.js"}}
+
+    bad = dsl.parse("fn : CloudFrontFunction(function_code: file(f.js))", REG)
+    assert any("quoted path" in e["msg"] for e in bad["errors"])
+
+
+def test_file_is_still_a_usable_name_without_paren():
+    res = dsl.parse('file = "x.co"\nhz : HostedZone(domain_name: file)', REG)
+    assert res["errors"] == []
+    assert res["graph"]["nodes"][0]["fields"]["domain_name"] == "x.co"
+
+
 def test_unclosed_paren_errors_with_statement_line():
     res = dsl.parse('hz : HostedZone(domain_name: "x.co"', REG)
     assert res["errors"][0]["line"] == 1

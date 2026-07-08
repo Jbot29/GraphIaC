@@ -121,6 +121,22 @@ test("a self-edge errors", () => {
   assert.ok(res.errors.some((e) => e.msg.includes("cannot connect to itself")));
 });
 
+/* ---- file() values ---- */
+test("file() stays symbolic and needs a quoted path", () => {
+  const res = K.parse('fn : CloudFrontFunction(function_code: file("f.js"))', registry);
+  assert.deepStrictEqual(res.errors, []);
+  assert.deepStrictEqual(res.graph.nodes[0].fields.function_code, { $file: { path: "f.js" } });
+
+  const bad = K.parse("fn : CloudFrontFunction(function_code: file(f.js))", registry);
+  assert.ok(bad.errors.some((e) => e.msg.includes("quoted path")));
+});
+
+test('"file" is still a usable name when not followed by (', () => {
+  const res = K.parse('file = "x.co"\nhz : HostedZone(domain_name: file)', registry);
+  assert.deepStrictEqual(res.errors, []);
+  assert.strictEqual(res.graph.nodes[0].fields.domain_name, "x.co");
+});
+
 /* ---- statements ---- */
 test("an unclosed paren errors with the statement's line", () => {
   const res = K.parse('hz : HostedZone(domain_name: "x.co"', registry);

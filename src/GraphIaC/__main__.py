@@ -39,7 +39,11 @@ def load_infra(gioc, path):
             for e in res["errors"]:
                 logger.error(f"{path}:{e['line']}: {e['msg']}")
             raise SystemExit(1)
-        return dsl.load_graph(gioc, res["graph"])
+        try:
+            return dsl.load_graph(gioc, res["graph"], base_dir=os.path.dirname(os.path.abspath(path)))
+        except FileNotFoundError as e:
+            logger.error(f"{path}: {e}")
+            raise SystemExit(1) from None
 
     module = load_user_infra_module(path)
     module.infra(gioc)
