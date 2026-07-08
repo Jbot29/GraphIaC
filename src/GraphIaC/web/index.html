@@ -41,6 +41,8 @@
   #editor:focus { outline:none; border-color:var(--water); }
 
   .controls { display:flex; gap:8px; align-items:center; flex:none; }
+  #serverBar { display:inline-flex; gap:8px; }
+  #serverBar[hidden] { display:none; }
   button { font-family:var(--mono); font-size:12px; padding:7px 14px; cursor:pointer;
     background:var(--ink); color:var(--paper); border:2px solid var(--ink); box-shadow:2px 2px 0 rgba(34,48,74,0.2); }
   button:hover { background:var(--water); border-color:var(--water); }
@@ -61,6 +63,17 @@
     background:var(--paper-deep); border:2px dashed var(--teal);
     color:var(--ink); font-family:var(--mono); font-size:11px; line-height:1.55;
     padding:10px 12px; white-space:pre; }
+
+  /* plan/run/verify output (server mode) */
+  #oplog { flex:none; max-height:34%; overflow:auto; margin:0;
+    background:var(--paper-deep); border:2px solid var(--ink);
+    color:var(--ink); font-family:var(--mono); font-size:11px; line-height:1.6;
+    padding:10px 12px; white-space:pre-wrap; }
+  .op-create, .op-create_edge, .ok { color:var(--teal); }
+  .op-update { color:var(--gold); }
+  .op-delete, .fail { color:var(--vermilion); }
+  .op-import { color:var(--water); }
+  .op-blocked { color:rgba(34,48,74,0.5); }
 
   .view { flex:1; border:2px solid var(--ink); background:#fbf8ef; box-shadow:3px 3px 0 rgba(34,48,74,0.18);
     display:flex; flex-direction:column; min-height:0; }
@@ -104,9 +117,16 @@ cf   -> hz : (domain_name: domain)
 </textarea>
       <div class="controls">
         <button id="desugarBtn" class="ghost" title="show this source with every lens resolved — constants substituted, names explicit, every edge type written out">⇄ desugar</button>
+        <span id="serverBar" hidden>
+          <button id="saveBtn" class="ghost" title="write the source back to the .giac file">💾 save</button>
+          <button id="planBtn" title="diff code / state DB / live AWS">▷ plan</button>
+          <button id="runBtn" title="apply the plan to AWS">▶ run</button>
+          <button id="verifyBtn" class="ghost" title="audit live AWS state">✓ verify</button>
+        </span>
         <span id="status">ready</span>
       </div>
       <pre id="issues" hidden></pre>
+      <pre id="oplog" hidden></pre>
       <pre id="desugared" hidden></pre>
     </div>
 
@@ -150,9 +170,14 @@ function colorOf(type) {
 }
 
 let current = null;   // last parse result
+const OPS = new Map(); // label -> last plan/run op, badged onto the diagram
+const OP_SYM = { create: "+", create_edge: "+", update: "~", "delete": "-", "import": "↳", blocked: "⊘" };
+const OP_COLOR = { create: "#1f7a6d", create_edge: "#1f7a6d", update: "#b98a1d",
+  "delete": "#c8451f", "import": "#3d7fa6", blocked: "rgba(34,48,74,0.45)" };
 
 /* ---- parse + draw on every edit ---- */
 function refresh() {
+  OPS.clear();         // the source changed — any previous plan is stale
   current = K.parse(editor.value, REG);
   const { graph, errors, warnings } = current;
   if (errors.length) {
@@ -226,6 +251,7 @@ function drawGraph(graph) {
   const defs = el("defs", {});
   defs.appendChild(marker("arr", "rgba(34,48,74,0.75)"));
   defs.appendChild(marker("arrRef", "#1f7a6d"));
+  defs.appendChild(marker("arrBlocked", "rgba(34,48,74,0.3)"));
   svg.appendChild(defs);
 
   if (!graph.nodes.length) {
@@ -245,14 +271,18 @@ function drawGraph(graph) {
     });
   });
 
-  // solid edges — the provisioned wiring
+  // solid edges — the provisioned wiring (greyed out when the plan says BLOCKED)
   for (const e of graph.edges) {
     const reg = REG.edges[e.type];
-    const a = pos.get(e.fields[reg.source.field]), b = pos.get(e.fields[reg.dest.field]);
+    const src = e.fields[reg.source.field], dst = e.fields[reg.dest.field];
+    const a = pos.get(src), b = pos.get(dst);
     if (!a || !b) continue;
+    const isBlocked = OPS.get(`${src} → ${dst}`) === "blocked";
     drawArrow(a, b, {
-      stroke: "rgba(34,48,74,0.75)", dash: null, markerId: "arr",
-      label: e.type.replace(/Edge$/, ""), labelColor: "#c8451f",
+      stroke: isBlocked ? "rgba(34,48,74,0.3)" : "rgba(34,48,74,0.75)",
+      dash: isBlocked ? "5 4" : null, markerId: isBlocked ? "arrBlocked" : "arr",
+      label: e.type.replace(/Edge$/, ""),
+      labelColor: isBlocked ? "rgba(34,48,74,0.4)" : "#c8451f",
       title: e.type + "\n" + JSON.stringify(e.fields, null, 1),
     });
   }
@@ -268,17 +298,28 @@ function drawGraph(graph) {
     });
   }
 
-  // nodes on top
+  // nodes on top — badged with the last plan's verdict for them
   for (const n of graph.nodes) {
     const p = pos.get(n.g_id), c = colorOf(n.type);
+    const op = OPS.get(n.g_id);
+    const blockedNode = op === "blocked";
     const g = el("g", {});
-    g.appendChild(el("rect", { x: p.x, y: p.y, width: BOX_W, height: BOX_H, rx: 3,
-      fill: "#fbf8ef", stroke: c, "stroke-width": 2 }));
-    g.appendChild(el("rect", { x: p.x, y: p.y, width: 5, height: BOX_H, fill: c }));
+    if (blockedNode) g.setAttribute("opacity", "0.7");
+    const box = el("rect", { x: p.x, y: p.y, width: BOX_W, height: BOX_H, rx: 3,
+      fill: "#fbf8ef", stroke: blockedNode ? "rgba(34,48,74,0.35)" : c, "stroke-width": 2 });
+    if (blockedNode) box.setAttribute("stroke-dasharray", "6 4");
+    g.appendChild(box);
+    g.appendChild(el("rect", { x: p.x, y: p.y, width: 5, height: BOX_H,
+      fill: blockedNode ? "rgba(34,48,74,0.35)" : c }));
     g.appendChild(el("text", { x: p.x + 14, y: p.y + 21, fill: "#22304a",
       "font-size": 13, "font-weight": "bold", "font-family": "var(--mono)" }, n.g_id));
     g.appendChild(el("text", { x: p.x + 14, y: p.y + 38, fill: "rgba(34,48,74,0.55)",
       "font-size": 10, "font-family": "var(--mono)" }, n.type));
+    if (op) {
+      g.appendChild(el("text", { x: p.x + BOX_W - 7, y: p.y + 17, "text-anchor": "end",
+        fill: OP_COLOR[op] || "#22304a", "font-size": 12, "font-weight": "bold",
+        "font-family": "var(--mono)" }, OP_SYM[op] || "·"));
+    }
     const t = el("title", {},
       n.g_id + " : " + n.type + "\n" + JSON.stringify(n.fields, null, 1));
     g.appendChild(t);
@@ -321,6 +362,89 @@ function el(tag, attrs, text) {
 
 window.addEventListener("resize", () => current && drawGraph(current.graph));
 refresh();
+
+/* =====================================================================
+ * SERVER MODE — when served by `python -m GraphIaC … serve`, the editor
+ * becomes the control panel: save the source, plan, run, verify. Opened
+ * as a plain file, none of this exists and the page stays a sandbox.
+ * =================================================================== */
+const serverBar = document.getElementById("serverBar");
+const oplog = document.getElementById("oplog");
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, data: await res.json() };
+}
+
+(async function detectServer() {
+  try {
+    const { status, data } = await api("/api/source");
+    if (status !== 200) return;
+    if (data.source && data.source.trim()) editor.value = data.source;
+    serverBar.hidden = false;
+    refresh();
+  } catch (e) { /* file:// — sandbox only, no controls */ }
+})();
+
+function logLines(lines) { oplog.hidden = false; oplog.innerHTML = lines.join("\n"); }
+function opLine(o) {
+  const reason = o.reason ? `  — ${esc(o.reason)}` : "";
+  return `<span class="op-${o.op}">${OP_SYM[o.op] || "·"} ${esc(o.type)} [${esc(o.label)}]${reason}</span>`;
+}
+
+async function engine(path, waitMsg) {
+  logLines([waitMsg + "…"]);
+  try {
+    const { status, data } = await api(path, { source: editor.value });
+    if (data.errors) {
+      logLines(data.errors.map(e => `<span class="fail">✗ line ${e.line}: ${esc(e.msg)}</span>`));
+      return;
+    }
+    if (data.error) {
+      logLines([`<span class="${status === 409 ? "op-update" : "fail"}">✗ ${esc(data.error)}</span>`]);
+      return;
+    }
+    const ops = data.ops || data.applied || [];
+    OPS.clear();
+    for (const o of ops) OPS.set(o.label, o.op);
+    drawGraph(current.graph);
+    logLines(ops.length ? ops.map(opLine)
+      : [`<span class="ok">✓ no changes — infrastructure is up to date</span>`]);
+  } catch (e) {
+    logLines([`<span class="fail">✗ ${esc(String(e))}</span>`]);
+  }
+}
+
+document.getElementById("planBtn").addEventListener("click", () => engine("/api/plan", "planning"));
+document.getElementById("runBtn").addEventListener("click", () => {
+  if (confirm("Apply this plan to AWS?")) engine("/api/run", "applying");
+});
+document.getElementById("saveBtn").addEventListener("click", async () => {
+  const { data } = await api("/api/source", { source: editor.value });
+  statusEl.textContent = data.saved ? "saved → " + data.path : "save failed";
+});
+document.getElementById("verifyBtn").addEventListener("click", async () => {
+  logLines(["verifying…"]);
+  try {
+    const { data } = await api("/api/verify", { source: editor.value });
+    if (data.errors || data.error) {
+      logLines([`<span class="fail">✗ ${esc(JSON.stringify(data.errors || data.error))}</span>`]);
+      return;
+    }
+    const lines = data.checks.map(c =>
+      `<span class="${c.passed ? "ok" : "fail"}">${c.passed ? "✓" : "✗"} ${esc(c.label)} — ${esc(c.name)}${c.message ? ": " + esc(c.message) : ""}</span>`);
+    lines.push(data.failed
+      ? `<span class="fail">${data.failed} check${data.failed === 1 ? "" : "s"} failed</span>`
+      : `<span class="ok">all checks passed</span>`);
+    logLines(lines);
+  } catch (e) {
+    logLines([`<span class="fail">✗ ${esc(String(e))}</span>`]);
+  }
+});
 </script>
 </body>
 </html>

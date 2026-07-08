@@ -51,10 +51,11 @@ def main():
 
     parser.add_argument("profile", help="Aws Profile to use")
     parser.add_argument("--infra_file", help="Path to the infrastructure definition (.py or .giac)")
+    parser.add_argument("--port", type=int, default=8642, help="Port for the serve command")
     parser.add_argument(
         "command",
-        choices=["plan", "run", "diagram", "verify"],
-        help="The command to run (e.g., plan, run, verify)",
+        choices=["plan", "run", "diagram", "verify", "serve"],
+        help="The command to run (e.g., plan, run, verify, serve)",
     )
 
     args = parser.parse_args()
@@ -63,10 +64,21 @@ def main():
         print("Infra file needed")
         return
 
+    session = boto3.session.Session(profile_name=args.profile)
+
+    if args.command == "serve":
+        # the editor UI owns the source from here — nothing is pre-loaded
+        from GraphIaC.server import serve
+
+        if not args.infra_file.endswith(".giac"):
+            print("serve works with .giac infra files")
+            return
+        serve(session, args.infra_file, port=args.port)
+        return
+
     base = os.path.splitext(args.infra_file)[0]
     db_conn = sqlite3.connect(base + ".db")
 
-    session = boto3.session.Session(profile_name=args.profile)
     gioc = GraphIaC.init(session, db_conn)
     blocked = load_infra(gioc, args.infra_file)
 

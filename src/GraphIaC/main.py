@@ -167,7 +167,7 @@ def run(state, blocked=None):
 
     if not changes:
         logger.info("No changes. Infrastructure is up to date.")
-        return
+        return []
 
     counts = {OperationType.CREATE: 0, OperationType.UPDATE: 0,
               OperationType.DELETE: 0, OperationType.IMPORT: 0,
@@ -228,9 +228,15 @@ def run(state, blocked=None):
     if n_blocked:
         parts.append(f"{n_blocked} blocked (re-run when upstream is ready)")
     logger.plan(f"Done. {', '.join(parts)}.")
+    return changes
 
 
-def verify(state):
+def verify(state, collected=None):
+    """Audit live AWS state; returns the failure count (for CI exit codes).
+
+    Pass a list as `collected` to also receive every check as a dict
+    (label/name/passed/message) — the HTTP API uses this.
+    """
     logger.plan("Verifying infrastructure...")
     total_passed = 0
     total_failed = 0
@@ -241,6 +247,10 @@ def verify(state):
             return
         logger.info(f"  {label}")
         for r in results:
+            if collected is not None:
+                collected.append(
+                    {"label": label, "name": r.name, "passed": r.passed, "message": r.message}
+                )
             if r.passed:
                 logger.info(f"    ✓ {r.name}" + (f": {r.message}" if r.message else ""))
                 total_passed += 1

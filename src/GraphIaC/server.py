@@ -1,0 +1,191 @@
+"""The GraphIaC backend server — hand-rolled, no framework.
+
+Serves the sandbox (src/GraphIaC/web/) and a five-route JSON API that
+turns the editor into a control panel:
+
+    GET  /               the sandbox (index.html, graphiac.js, registry.js)
+    GET  /api/source     the .giac source on disk
+    POST /api/source     save the editor's source back to disk   {source}
+    POST /api/plan       parse + load + plan                     {source}
+    POST /api/run        parse + load + run (applies to AWS!)    {source}
+    POST /api/verify     parse + load + verify                   {source}
+
+Design notes:
+  - `Api` is transport-agnostic: plain dicts in, (status, dict) out. The
+    local http.server handler below is one caller; the future
+    Lambda-hosted deployment is another. Keep AWS/engine logic in Api,
+    HTTP mechanics in Handler.
+  - One engine operation at a time: a non-blocking lock returns 409
+    ("busy") rather than queueing — the UI shows it and the user retries.
+  - Binds 127.0.0.1 by default. There is no auth yet; do not bind wider
+    until Cognito lands.
+
+Start it:  python -m GraphIaC <profile> --infra_file site.giac serve
+"""
+
+import json
+import os
+import sqlite3
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+import GraphIaC
+from GraphIaC import dsl
+from GraphIaC.dsl import BlockedItem
+from GraphIaC.models import BaseEdge
+
+from .logs import setup_logger
+
+logger = setup_logger()
+
+WEB_DIR = Path(__file__).parent / "web"
+CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+}
+
+
+def _op_json(op):
+    """One plan/run Operation as the JSON the UI renders and badges with."""
+    obj = op.obj
+    if isinstance(obj, BlockedItem):
+        return {"op": op.operation.value, "type": obj.type, "label": obj.g_id, "reason": obj.reason}
+    if isinstance(obj, BaseEdge):
+        label = f"{obj.source_g_id} → {obj.destination_g_id}"
+    else:
+        label = obj.g_id
+    return {"op": op.operation.value, "type": obj.__class__.__name__, "label": label}
+
+
+class Api:
+    def __init__(self, session, infra_path):
+        self.session = session
+        self.infra_path = Path(infra_path)
+        self.db_path = str(self.infra_path.with_suffix(".db"))
+        self.lock = threading.Lock()  # one engine operation at a time
+
+    # ---- source file ----
+    def get_source(self):
+        source = self.infra_path.read_text() if self.infra_path.exists() else ""
+        return 200, {"source": source, "path": str(self.infra_path)}
+
+    def post_source(self, body):
+        if "source" not in body:
+            return 400, {"error": 'missing "source"'}
+        self.infra_path.write_text(body["source"])
+        return 200, {"saved": True, "path": str(self.infra_path)}
+
+    # ---- engine ----
+    def _load(self, source):
+        """source -> (state, blocked, error_response). Fresh state per call,
+        same on-disk DB — exactly what the CLI does."""
+        res = dsl.parse(source)
+        if res["errors"]:
+            return None, None, (400, {"errors": res["errors"], "warnings": res["warnings"]})
+        conn = sqlite3.connect(self.db_path)
+        state = GraphIaC.init(self.session, conn)
+        blocked = dsl.load_graph(state, res["graph"])
+        return state, blocked, None
+
+    def _engine(self, body, fn):
+        if "source" not in body:
+            return 400, {"error": 'missing "source"'}
+        if not self.lock.acquire(blocking=False):
+            return 409, {"error": "another operation is running — try again"}
+        try:
+            state, blocked, err = self._load(body["source"])
+            if err:
+                return err
+            try:
+                return fn(state, blocked)
+            finally:
+                state.db_conn.close()
+        except Exception as e:  # surface engine/AWS failures as JSON, keep serving
+            logger.error(f"engine error: {e}")
+            return 500, {"error": f"{e.__class__.__name__}: {e}"}
+        finally:
+            self.lock.release()
+
+    def post_plan(self, body):
+        return self._engine(
+            body, lambda state, blocked: (200, {"ops": [_op_json(o) for o in GraphIaC.plan(state, blocked)]})
+        )
+
+    def post_run(self, body):
+        return self._engine(
+            body, lambda state, blocked: (200, {"applied": [_op_json(o) for o in GraphIaC.run(state, blocked)]})
+        )
+
+    def post_verify(self, body):
+        def go(state, blocked):
+            checks = []
+            failed = GraphIaC.verify(state, collected=checks)
+            return 200, {"checks": checks, "failed": failed}
+
+        return self._engine(body, go)
+
+
+class Handler(BaseHTTPRequestHandler):
+    api: Api = None  # set by serve()
+
+    def _json(self, status, payload):
+        data = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _static(self, path):
+        name = "index.html" if path in ("/", "") else path.lstrip("/")
+        target = (WEB_DIR / name).resolve()
+        if target.parent != WEB_DIR.resolve() or not target.is_file():
+            return self._json(404, {"error": "not found"})
+        data = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", CONTENT_TYPES.get(target.suffix, "application/octet-stream"))
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        path = self.path.split("?")[0]
+        if path == "/api/source":
+            return self._json(*self.api.get_source())
+        if path.startswith("/api/"):
+            return self._json(404, {"error": "not found"})
+        return self._static(path)
+
+    def do_POST(self):
+        path = self.path.split("?")[0]
+        routes = {
+            "/api/source": self.api.post_source,
+            "/api/plan": self.api.post_plan,
+            "/api/run": self.api.post_run,
+            "/api/verify": self.api.post_verify,
+        }
+        if path not in routes:
+            return self._json(404, {"error": "not found"})
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except json.JSONDecodeError:
+            return self._json(400, {"error": "body must be JSON"})
+        return self._json(*routes[path](body))
+
+    def log_message(self, format, *args):  # quiet http.server's per-request stderr lines
+        logger.debug(f"{self.address_string()} {format % args}")
+
+
+def serve(session, infra_path, port=8642, host="127.0.0.1"):
+    Handler.api = Api(session, infra_path)
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    logger.plan(f"GraphIaC serving {os.path.basename(str(infra_path))} at http://{host}:{port}")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        logger.info("bye")
+    finally:
+        httpd.server_close()
