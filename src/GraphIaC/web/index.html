@@ -80,7 +80,8 @@
   .view .cap { font-size:9px; letter-spacing:0.18em; text-transform:uppercase; color:var(--ink-soft);
     padding:6px 10px 2px; display:flex; justify-content:space-between; flex:none; }
   .view .cap b { color:var(--vermilion); font-weight:500; }
-  #graph { width:100%; flex:1; min-height:0; display:block; }
+  #graph { width:100%; flex:1; min-height:0; display:block; cursor:grab; touch-action:none; }
+  #graph:active { cursor:grabbing; }
 </style>
 </head>
 <body>
@@ -133,7 +134,7 @@ cf   -> hz : (domain_name: domain)
     <div class="col">
       <div class="panel-label"><span>Graph</span><span class="hint">nodes are resources · edges are the wiring</span></div>
       <div class="view">
-        <div class="cap"><span><b>solid</b> = provisioned connection</span><span>dashed = data dependency (blocks until resolvable)</span></div>
+        <div class="cap"><span><b>solid</b> = provisioned · dashed = data dependency</span><span>wheel = zoom · drag = pan · double-click = fit</span></div>
         <svg id="graph"></svg>
       </div>
     </div>
@@ -239,13 +240,31 @@ function layout(graph) {
   return cols.filter(Boolean);
 }
 
-const BOX_W = 172, BOX_H = 50;
+const BOX_H = 50, GAP_X = 70, GAP_Y = 30, PAD = 40;
+
+// a box is as wide as its longest line (label is 13px mono + badge room)
+function nodeWidth(n) {
+  return Math.max(150, 28 + 24 + n.g_id.length * 7.9, 28 + n.type.length * 6.1);
+}
+
+/* the viewBox is the camera: fit on every redraw, then wheel = zoom,
+ * drag = pan, double-click = fit again */
+let view = null;      // current viewBox {x,y,w,h}
+let fitBox = null;    // the "home" framing for the current graph
+
+function applyView() {
+  if (view) svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+}
+function fitView() {
+  if (!fitBox) return;
+  // don't blow a tiny graph up into a jumbotron: enforce a minimum window
+  const w = Math.max(fitBox.w, 640), h = Math.max(fitBox.h, 360);
+  view = { x: fitBox.x - (w - fitBox.w) / 2, y: fitBox.y - (h - fitBox.h) / 2, w, h };
+  applyView();
+}
 
 function drawGraph(graph) {
   while (svg.firstChild) svg.removeChild(svg.firstChild);
-  const r = svg.getBoundingClientRect();
-  const W = Math.max(r.width, 300), H = Math.max(r.height, 200);
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
 
   // arrowheads
   const defs = el("defs", {});
@@ -255,21 +274,30 @@ function drawGraph(graph) {
   svg.appendChild(defs);
 
   if (!graph.nodes.length) {
-    svg.appendChild(el("text", { x: W / 2, y: H / 2, "text-anchor": "middle",
+    view = fitBox = null;
+    svg.setAttribute("viewBox", "0 0 600 300");
+    svg.appendChild(el("text", { x: 300, y: 150, "text-anchor": "middle",
       fill: "rgba(34,48,74,0.4)", "font-size": 12, "font-family": "var(--mono)" },
       "declare a node:  label : Type(…)"));
     return;
   }
 
+  // layout in content coordinates; the viewBox scales it to the panel
   const cols = layout(graph);
   const pos = new Map();
-  const colW = Math.max(BOX_W + 60, (W - 40) / cols.length);
+  const colWidths = cols.map((col) => Math.max(...col.map(nodeWidth)));
+  const maxRows = Math.max(...cols.map((c) => c.length));
+  const totalH = maxRows * (BOX_H + GAP_Y) - GAP_Y;
+  let x = 0;
   cols.forEach((col, ci) => {
-    const rowH = H / col.length;
+    const colH = col.length * (BOX_H + GAP_Y) - GAP_Y;
     col.forEach((n, ri) => {
-      pos.set(n.g_id, { x: 24 + ci * colW, y: rowH * (ri + 0.5) - BOX_H / 2 });
+      pos.set(n.g_id, { x, y: (totalH - colH) / 2 + ri * (BOX_H + GAP_Y), w: nodeWidth(n) });
     });
+    x += colWidths[ci] + GAP_X;
   });
+  fitBox = { x: -PAD, y: -PAD, w: (x - GAP_X) + PAD * 2, h: totalH + PAD * 2 };
+  fitView();
 
   // solid edges — the provisioned wiring (greyed out when the plan says BLOCKED)
   for (const e of graph.edges) {
@@ -305,7 +333,7 @@ function drawGraph(graph) {
     const blockedNode = op === "blocked";
     const g = el("g", {});
     if (blockedNode) g.setAttribute("opacity", "0.7");
-    const box = el("rect", { x: p.x, y: p.y, width: BOX_W, height: BOX_H, rx: 3,
+    const box = el("rect", { x: p.x, y: p.y, width: p.w, height: BOX_H, rx: 3,
       fill: "#fbf8ef", stroke: blockedNode ? "rgba(34,48,74,0.35)" : c, "stroke-width": 2 });
     if (blockedNode) box.setAttribute("stroke-dasharray", "6 4");
     g.appendChild(box);
@@ -316,7 +344,7 @@ function drawGraph(graph) {
     g.appendChild(el("text", { x: p.x + 14, y: p.y + 38, fill: "rgba(34,48,74,0.55)",
       "font-size": 10, "font-family": "var(--mono)" }, n.type));
     if (op) {
-      g.appendChild(el("text", { x: p.x + BOX_W - 7, y: p.y + 17, "text-anchor": "end",
+      g.appendChild(el("text", { x: p.x + p.w - 7, y: p.y + 17, "text-anchor": "end",
         fill: OP_COLOR[op] || "#22304a", "font-size": 12, "font-weight": "bold",
         "font-family": "var(--mono)" }, OP_SYM[op] || "·"));
     }
@@ -328,7 +356,7 @@ function drawGraph(graph) {
 }
 
 function drawArrow(a, b, opt) {
-  const x1 = a.x + BOX_W, y1 = a.y + BOX_H / 2;
+  const x1 = a.x + a.w, y1 = a.y + BOX_H / 2;
   const x2 = b.x - 6, y2 = b.y + BOX_H / 2;
   const mx = (x1 + x2) / 2;
   const d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
@@ -359,6 +387,43 @@ function el(tag, attrs, text) {
   if (text != null) e.textContent = text;
   return e;
 }
+
+/* ---- camera: wheel = zoom (at the cursor), drag = pan, dbl-click = fit ---- */
+function svgPt(e) {
+  const pt = svg.createSVGPoint();
+  pt.x = e.clientX; pt.y = e.clientY;
+  const m = svg.getScreenCTM();
+  return m ? pt.matrixTransform(m.inverse()) : pt;
+}
+svg.addEventListener("wheel", (e) => {
+  if (!view) return;
+  e.preventDefault();
+  const p = svgPt(e);
+  const k = Math.min(Math.max(Math.pow(1.0015, e.deltaY), 0.5), 2);  // smooth on trackpads
+  const w = Math.min(Math.max(view.w * k, 160), 40000);
+  const kk = w / view.w;
+  view = { x: p.x - (p.x - view.x) * kk, y: p.y - (p.y - view.y) * kk, w, h: view.h * kk };
+  applyView();
+}, { passive: false });
+
+let panFrom = null;
+svg.addEventListener("pointerdown", (e) => {
+  if (!view) return;
+  panFrom = { px: e.clientX, py: e.clientY, v: { ...view } };
+  svg.setPointerCapture(e.pointerId);
+});
+svg.addEventListener("pointermove", (e) => {
+  if (!panFrom || !view) return;
+  const r = svg.getBoundingClientRect();
+  const scale = Math.min(r.width / panFrom.v.w, r.height / panFrom.v.h);
+  view = { ...panFrom.v,
+    x: panFrom.v.x - (e.clientX - panFrom.px) / scale,
+    y: panFrom.v.y - (e.clientY - panFrom.py) / scale };
+  applyView();
+});
+svg.addEventListener("pointerup", () => { panFrom = null; });
+svg.addEventListener("pointercancel", () => { panFrom = null; });
+svg.addEventListener("dblclick", fitView);
 
 window.addEventListener("resize", () => current && drawGraph(current.graph));
 refresh();
