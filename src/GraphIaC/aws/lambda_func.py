@@ -4,10 +4,13 @@ from typing import Optional
 from botocore.exceptions import ClientError
 from pydantic import Field
 
+from ..logs import setup_logger
 from ..models import BaseNode
 from .iam_policy import IamTrustPolicyStatement
 from .iam_role import IAMRolePolicyEdge, attach_role_policy
 from .types import AwsName
+
+logger = setup_logger()
 
 # TODO: Zipfile compare sha
 
@@ -34,7 +37,18 @@ class IAMRolePolicyLambdaEdge(IAMRolePolicyEdge):
     policy_arn: str = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
     def read(self, session, G):
-        print("READ EDGE POLICY")
+        role_name = G.nodes[self.role_g_id]["data"].read_id
+        iam = session.client("iam")
+        try:
+            paginator = iam.get_paginator("list_attached_role_policies")
+            for page in paginator.paginate(RoleName=role_name):
+                for p in page["AttachedPolicies"]:
+                    if p["PolicyArn"] == self.policy_arn:
+                        return self
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "NoSuchEntity":  # no role yet = not attached
+                logger.error(f"Error reading attached policies for {role_name}: {e}")
+        return None
 
     def create(self, session, G):
         role_name = G.nodes[self.role_g_id]["data"].read_id
@@ -80,9 +94,6 @@ class LambdaZipFile(BaseNode):
             if isinstance(edge_data, IAMRolePolicyLambdaEdge):
                 role_edge = edge_data
 
-        print(role_edge)
-        print("2", role_edge.role_g_id)
-        print(G.nodes[role_edge.role_g_id]["data"])
         iam_role = G.nodes[role_edge.role_g_id]["data"]
 
         return lambda_create(

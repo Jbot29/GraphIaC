@@ -1,0 +1,33 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "cf",
+        "type": "CloudFrontDistribution",
+        "fields": {
+          "domain_name": "x.co",
+          "cert_arn": "arn:aws:acm:us-east-1:123:certificate/x"
+        },
+        "line": 3
+      },
+      {
+        "g_id": "fn",
+        "type": "CloudFrontFunction",
+        "fields": {
+          "name": "rewrite",
+          "function_code": { "$file": { "path": "fn.js" } }
+        },
+        "line": 4
+      }
+    ],
+    "edges": [
+      {
+        "type": "CloudFrontFunctionEdge",
+        "fields": { "fn_g_id": "fn", "cf_g_id": "cf" },
+        "inferred": true,
+        "line": 6
+      }
+    ]
+  },
+  "errors": []
+}

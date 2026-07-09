@@ -3,7 +3,7 @@
 > **Early Alpha — Experimental Software**
 > GraphIaC is in early alpha. APIs will change, features are incomplete, and it has not been tested in production. Use at your own risk.
 
-A graph-based Infrastructure-as-Code framework for AWS. Model your cloud infrastructure as a directed graph — **nodes are AWS resources, edges are the connections and permissions between them**.
+A graph-based Infrastructure-as-Code framework for AWS. Model your cloud infrastructure as a directed graph — **nodes are AWS resources, edges are the connections and permissions between them** — in a small declarative language, with a live browser UI to edit, plan, and apply it.
 
 ## The Problem
 
@@ -11,163 +11,131 @@ Tools like Terraform and Pulumi make it easy to define individual resources. The
 
 ## The Approach
 
-GraphIaC promotes connections to first-class citizens. When you add a `LambdaToDynamoEdge`, the edge already knows what IAM policies are required. It queries the graph for the relevant ARNs and provisions everything itself. You declare the connection; the edge handles the boilerplate.
+GraphIaC promotes connections to first-class citizens. When you write `cf -> bucket`, the edge already knows it means an Origin Access Control bucket policy — it queries the graph for the relevant ARNs and provisions everything itself. You declare the connection; the edge handles the boilerplate.
 
-Because AWS permission patterns are stable, that knowledge gets written once into the edge class and reused everywhere. Nodes stay clean and self-contained, which means they're also easy to copy across projects.
+Because AWS permission patterns are stable, that knowledge gets written once into the edge class and reused everywhere. And because the infrastructure is a graph, the diagram you see in the UI is never out of date — it *is* the code.
 
-A secondary benefit: because the infrastructure is a graph, you can render it as a diagram at any time — always up to date, no manual documentation required.
+## Quick Start
 
-## Key Concepts
-
-- **Nodes** — AWS resources (Lambda, DynamoDB table, IAM role, API Gateway, etc.), each a Pydantic model with `read`, `create`, `update`, and `delete` methods
-- **Edges** — the connections between resources; each edge knows what it takes to wire two nodes together (IAM policies, invoke permissions, etc.)
-- **State reconciliation** — on every `plan()`, GraphIaC diffs live AWS state against a local SQLite DB and produces a list of `CREATE`, `UPDATE`, `DELETE`, or `IMPORT` operations
-- **`run()`** — executes the plan in the correct order
-- **`verify()`** — an independent audit layer that reads directly from AWS (bypasses the local DB) and runs per-resource security and configuration checks; exits non-zero for CI gating
-
-## Install
+**1. Install (or upgrade):**
 
 ```bash
-pip install GraphIaC
+pip install --upgrade GraphIaC
 ```
 
-**For development (editable install with test dependencies):**
+**2. Have an AWS profile ready.** GraphIaC uses your local AWS credentials (`~/.aws/credentials`), selected by profile name. The profile needs permissions for whatever you plan to manage (for early testing, an admin-ish sandbox account is the practical choice).
+
+**3. Write an infra file.** Infrastructure is described in a small language (files end in `.giac`). A complete static website:
+
+```
+# site.giac — Route53 -> CloudFront (HTTPS) -> S3
+domain = "example.com"
+
+hz     : HostedZone(domain_name: domain)
+cert   : ACMCertificate(domain_name: domain)
+bucket : S3Bucket("example-com-site")
+cf     : CloudFrontDistribution(domain_name: domain)
+
+cert -> hz          # DNS validation records, automatically
+cert -> cf          # viewer certificate; cf waits until the cert is ISSUED
+cf   -> bucket      # OAC: only this distribution can read the bucket
+cf   -> hz : (domain_name: domain)   # A alias record
+```
+
+**4. Start the server and open the UI:**
 
 ```bash
-pip install -e ".[dev]"
+python -m GraphIaC <your-profile> --infra_file site.giac serve
+# GraphIaC serving site.giac at http://127.0.0.1:8642
 ```
 
-GraphIaC can export infrastructure diagrams via Graphviz. To enable that, install `pygraphviz`:
+Open **http://127.0.0.1:8642**. You get:
+
+- **Editor (left)** — your `.giac` source, re-parsed as you type; errors and warnings appear inline with line numbers. **💾 save** writes it back to the file on disk.
+- **Diagram (right)** — the live graph. Solid arrows are provisioned connections (each one is an IAM policy, bucket policy, DNS record, or integration you didn't have to write). Dashed teal arrows are data dependencies.
+- **▷ plan** — diffs your source against the state DB and live AWS, and shows the result both as a log (`+` create, `~` update, `-` delete, `↳` import, `⊘` blocked) and as badges on the diagram.
+- **▶ run** — applies the plan to AWS (asks for confirmation first).
+- **✓ verify** — an independent audit: reads live AWS state and runs per-resource security/config checks.
+- **⇄ desugar** — shows your source with every shorthand resolved: constants substituted, inferred edge types written out, defaults made explicit.
+
+The SQLite state DB is created next to the infra file (`site.giac` → `site.db`).
+
+The server binds `127.0.0.1` only and has **no authentication** — don't expose the port.
+
+### Things to know before pointing it at a real account
+
+- **`plan` and `verify` are read-only.** `run` is what changes AWS.
+- **Removing a node from the source schedules its deletion.** Once a resource is tracked in the state DB, deleting its line means the next plan shows `- will be deleted` and the next run deletes it from AWS. Check the plan before running.
+- Resources that already exist in AWS are **imported, not recreated** — see below.
+
+## The Language in Sixty Seconds
+
+Five ideas, nothing more (full spec: [`dsl/spec.md`](dsl/spec.md)):
+
+```
+name = "value"              # a constant, substituted at parse time
+label : Type(field: value)  # a node — the label IS its identity, and
+                            #   defaults into the type's name field
+a -> b                      # an edge — its type is INFERRED from the
+                            #   node-type pair; `: Type(args)` overrides
+other.field                 # an attribute reference — a data dependency
+                            #   resolved from live AWS state at plan time
+# comment
+```
+
+**Name defaulting:** `my-site-bucket : S3Bucket` needs nothing else — the label names the bucket. One rule replaces the id/name split: the label names the thing everywhere, unless you say otherwise.
+
+**Edge inference:** every edge is uniquely determined by its endpoints — `cf -> bucket` can only mean the OAC edge, `cert -> hz` only DNS validation. You point; the edge knows. Arrow direction doesn't matter; the parser normalizes it.
+
+**Slow resources & BLOCKED:** some resources take hours to become usable (ACM certificate validation is the classic). There is no phase logic in the source. An edge can *gate* its destination — `cert -> cf` holds the distribution **`⊘ BLOCKED`** (greyed out in the diagram) until the certificate is ISSUED — and an attribute reference like `cert.arn` blocks the same way until it resolves from live AWS state. Blocked resources are simply skipped; run again later and the planner picks up where AWS left off.
+
+## Headless CLI (no UI)
+
+Every UI action works directly on a `.giac` file — useful for scripts and CI:
 
 ```bash
-pip install --config-settings="--global-option=build_ext" \
-            --config-settings="--global-option=-I$(brew --prefix graphviz)/include/" \
-            --config-settings="--global-option=-L$(brew --prefix graphviz)/lib/" \
-            pygraphviz
-```
-
-## Usage
-
-```python
-import sqlite3
-import boto3
-import GraphIaC
-from GraphIaC.aws.dynamodb import DynamoTable, DynamoKey
-from GraphIaC.aws.lambda_func import LambdaFunction
-
-session = boto3.Session(profile_name="my-profile")
-db_conn = sqlite3.connect("my-infra.db")
-
-state = GraphIaC.init(session, db_conn)
-
-table = DynamoTable(g_id="users_table", table_name="users", partition_key=DynamoKey(name="pk", attr_type="S"))
-GraphIaC.add_node(state, table)
-
-# plan() shows what will change; run() applies it
-GraphIaC.plan(state)
-GraphIaC.run(state)
-```
-
-## CLI
-
-GraphIaC ships a command-line interface so you can run infra operations without writing a script.
-
-```
-python -m GraphIaC <aws-profile> --infra_file <path/to/infra.py> <command>
-```
-
-**Commands**
-
-| Command | What it does |
-|---------|--------------|
-| `plan` | Diffs live AWS state against the local DB and prints the changes that would be applied |
-| `run` | Applies the plan — creates, updates, and deletes resources |
-| `verify` | Reads live AWS state and runs per-resource security and config checks; exits 1 if any check fails (for CI gating) |
-| `diagram` | Renders the infrastructure graph as a Graphviz PNG |
-
-**Examples**
-
-```bash
-# Preview changes for a profile named my-aws-profile
-python -m GraphIaC my-aws-profile --infra_file infra.py plan
-
-# Apply changes
-python -m GraphIaC my-aws-profile --infra_file infra.py run
-
-# Verify live infrastructure (exits 1 if any check fails)
-python -m GraphIaC my-aws-profile --infra_file infra.py verify
-
-# Render a diagram
-python -m GraphIaC my-aws-profile --infra_file infra.py diagram
-```
-
-The SQLite state DB is created automatically next to the infra file (e.g. `infra.py` → `infra.db`). Your infra file must expose an `infra(state)` function that builds the graph:
-
-```python
-# infra.py
-def infra(state):
-    table = DynamoTable(g_id="users_table", ...)
-    GraphIaC.add_node(state, table)
-    # add more nodes and edges...
+python -m GraphIaC <profile> --infra_file site.giac plan     # preview changes
+python -m GraphIaC <profile> --infra_file site.giac run      # apply
+python -m GraphIaC <profile> --infra_file site.giac verify   # audit; exits 1 on failure
+python -m GraphIaC <profile> --infra_file site.giac diagram  # Graphviz PNG (needs pygraphviz)
 ```
 
 ## Importing Existing Resources
 
-If you built infrastructure by hand (or with another tool) before adopting GraphIaC, you don't need to tear it down and recreate it. Import is **automatic** — there's no separate import step to run.
+If you built infrastructure by hand (or with another tool) before adopting GraphIaC, you don't tear it down. Import is **automatic**: when a node is declared in your source and exists in AWS but isn't in the state DB yet, plan marks it `↳ import` — the next run records its live state without touching AWS.
 
-`plan()` reconciles three layers: live AWS state, the local SQLite DB (what was last applied), and your code. When a node is **declared in `infra.py`** and **exists in AWS** but is **not yet in the DB**, GraphIaC marks it `IMPORT`: on the next `run`, it records the resource's live state into the DB without creating or modifying anything in AWS.
-
-So adopting an existing resource is just: declare it, then run.
-
-```python
-# infra.py — adopt a website that already exists in AWS
-def infra(state):
-    bucket = S3Bucket(g_id="web_bucket", bucket_name="my-site-prod", region="us-east-2")
-    GraphIaC.add_node(state, bucket)
-
-    dist = CloudFrontDistribution(
-        g_id="web_cf",
-        domain_name="example.com",
-        cert_arn="arn:aws:acm:us-east-1:...:certificate/...",
-        distribution_id="E3ENDXK34ZYQPN",  # optional; speeds up lookup
-    )
-    GraphIaC.add_node(state, dist)
+```
+# adopt a site that already exists
+bucket : S3Bucket("my-site-prod", region: "us-east-2")
+cf     : CloudFrontDistribution(domain_name: "example.com",
+                                cert_arn: "arn:aws:acm:us-east-1:...:certificate/...")
 ```
 
-```bash
-python -m GraphIaC my-profile --infra_file infra.py plan
-#   ↳ S3Bucket [web_bucket]              will be imported
-#   ↳ CloudFrontDistribution [web_cf]    will be imported
+Worth knowing:
 
-python -m GraphIaC my-profile --infra_file infra.py run   # records live state to the DB
-```
+- **Declare only the fields you care about.** Drift is checked only on fields you explicitly set, so a sparse declaration won't false-positive against the fully-populated AWS resource.
+- **Lookup is by natural key.** Most nodes can be found by bucket name, domain, or zone name — you usually don't need to hunt down ARNs or IDs first.
+- **Edges are re-asserted, not imported.** They're idempotent: on the first run they re-apply against the existing wiring (a no-op if it's already in place) and are tracked from then on.
 
-A few things worth knowing:
+## What's in the Box
 
-- **You only need to declare the fields you care about.** `read()` fetches the full live state from AWS, and `diff()` only compares fields you explicitly set to a non-`None` value — so a sparse declaration like `HostedZone(g_id="hz", domain_name="example.com")` won't false-positive as drift against the fully-populated AWS resource.
-- **Lookup is by ID or by natural key.** Most nodes can be found by a human-friendly identifier (a bucket name, a domain, a hosted-zone name) when you haven't supplied the AWS resource ID yet, so you can usually import without hunting down ARNs first.
-- **Edges are re-asserted, not imported.** GraphIaC's edges (IAM policies, bucket policies, DNS records, service integrations) are written to be idempotent, so on the first `run` they re-apply against the existing wiring — which changes nothing if it's already in place — and are then tracked in the DB like everything else.
+Current node types: S3, CloudFront (distributions + functions), Route53, ACM, IAM roles, Lambda, DynamoDB, API Gateway (HTTP APIs), SES, and the edges that wire them together — DNS validation, OAC bucket policies, alias records, execution-role policies, route integrations + invoke permissions, and more. The full inference table is in [`dsl/spec.md`](dsl/spec.md); the sandbox's error messages will tell you when no edge exists between two types yet.
 
-After the first `run`, the imported resources are under management: subsequent plans diff against the DB and only show real changes.
+## Python API
+
+GraphIaC is DSL-first, but the underlying Python interface is still available — every node and edge is a Pydantic model you can compose in code (`GraphIaC.init`, `add_node`, `add_edge`, `plan`, `run`, `verify`), and `--infra_file infra.py` files exposing an `infra(state)` function still work with the CLI. Expect the DSL path to be the one that gets the attention going forward.
 
 ## Running Tests
 
-Tests mirror the source tree (`tests/aws/` covers `src/GraphIaC/aws/`, and so on for future providers).
-
-**AWS integration tests** hit real AWS and require credentials. Set `AWS_PROFILE` to the profile you want to use, then run:
-
 ```bash
-AWS_PROFILE=your-profile pytest tests/aws/
+pytest tests/test_dsl.py tests/test_dsl_load.py tests/test_server.py   # engine + DSL (no AWS; uses moto)
+node --test src/GraphIaC/web/                                          # the JS parser twin
+AWS_PROFILE=your-profile pytest tests/aws/                             # real-AWS integration tests
 ```
 
-Tests generate randomized resource names on every run and clean up after themselves, including on failure. Resources are created in `us-east-2` by default.
+The two DSL parsers (JavaScript for the editor, Python for the engine) are kept in sync by a shared fixture corpus in `dsl/fixtures/` — both suites run it.
 
-**Run a specific test file:**
-```bash
-AWS_PROFILE=your-profile pytest tests/aws/test_dynamodb.py -v
-```
-
-**Skip AWS tests** (e.g. in CI without credentials) — omit `AWS_PROFILE` or unset it. Any test that needs AWS will be skipped automatically.
+AWS integration tests generate randomized resource names, clean up after themselves (including on failure), and default to `us-east-2`. Without `AWS_PROFILE` set they're skipped automatically.
 
 ## License
 

@@ -98,20 +98,23 @@ class SESDomainRoute53Edge(BaseEdge):
         if not ses_node.dkim_tokens or not zone_node.zone_id:
             return None
 
+        # Check each DKIM record individually: Route53 lists records in name
+        # order starting at StartRecordName, and the random token names don't
+        # sort together predictably — a single listing can miss earlier ones.
         route53 = session.client("route53")
         try:
-            expected = {f"{t}._domainkey.{ses_node.domain}" for t in ses_node.dkim_tokens}
-            resp = route53.list_resource_record_sets(
-                HostedZoneId=zone_node.zone_id,
-                StartRecordName=f"{ses_node.dkim_tokens[0]}._domainkey.{ses_node.domain}",
-                StartRecordType="CNAME",
-                MaxItems="10",
-            )
-            found = {
-                r["Name"].rstrip(".") for r in resp["ResourceRecordSets"] if r["Type"] == "CNAME"
-            }
-            if expected.issubset(found):
-                return self
+            for token in ses_node.dkim_tokens:
+                name = f"{token}._domainkey.{ses_node.domain}"
+                resp = route53.list_resource_record_sets(
+                    HostedZoneId=zone_node.zone_id,
+                    StartRecordName=name,
+                    StartRecordType="CNAME",
+                    MaxItems="1",
+                )
+                sets = resp.get("ResourceRecordSets", [])
+                if not sets or sets[0]["Name"].rstrip(".") != name:
+                    return None
+            return self  # all DKIM records present
         except ClientError as e:
             logger.error(f"Error reading DKIM records: {e}")
         return None

@@ -252,6 +252,21 @@ class _Scanner:
         if ident:
             if ident in ("true", "false"):
                 return {"t": "bool", "v": ident == "true"}
+            if ident == "file" and self.at() == "(":
+                self.i += 1
+                self.ws()
+                if self.at() != '"':
+                    self.err(self.ln, 'file(...) takes a quoted path — e.g. file("handler.js")')
+                    return None
+                p = self._string()
+                if p is None:
+                    return None
+                self.ws()
+                if self.at() != ")":
+                    self.err(self.ln, "expected ) after file path")
+                    return None
+                self.i += 1
+                return {"t": "fileval", "path": p["v"]}
             if self.at() == ".":
                 self.i += 1
                 f = self.ident()
@@ -360,6 +375,10 @@ def parse(src, registry=None):
                     return _FAIL
                 out[k] = r
             return out
+        if t == "fileval":
+            # stays symbolic — load_graph reads the file, relative to the
+            # source file's directory; parse never touches the disk
+            return {"$file": {"path": v["path"]}}
         if t == "ident":
             if v["v"] in consts:
                 return consts[v["v"]]
@@ -575,6 +594,9 @@ def _fmt_value(v):
         return "[" + ", ".join(_fmt_value(e) for e in v) + "]"
     if isinstance(v, dict) and "$ref" in v:
         return f'{v["$ref"]["g_id"]}.{v["$ref"]["field"]}'
+    if isinstance(v, dict) and "$file" in v:
+        path = v["$file"]["path"].replace("\\", "\\\\").replace('"', '\\"')
+        return f'file("{path}")'
     if isinstance(v, dict):
         return "{" + ", ".join(f"{k}: {_fmt_value(e)}" for k, e in v.items()) + "}"
     return str(v)
@@ -671,33 +693,48 @@ def _collect_refs(v, out):
     return out
 
 
-def _substitute(v, resolve_ref):
+def _substitute(v, resolve_ref, resolve_file):
     if isinstance(v, dict):
         if "$ref" in v:
             return resolve_ref(v["$ref"])  # may raise _Blocked
-        return {k: _substitute(e, resolve_ref) for k, e in v.items()}
+        if "$file" in v:
+            return resolve_file(v["$file"])
+        return {k: _substitute(e, resolve_ref, resolve_file) for k, e in v.items()}
     if isinstance(v, list):
-        return [_substitute(e, resolve_ref) for e in v]
+        return [_substitute(e, resolve_ref, resolve_file) for e in v]
     return v
 
 
-def load_graph(state, graph):
+def load_graph(state, graph, base_dir=None):
     """Instantiate a parsed DSL graph into `state` (a GraphIaCState).
 
     Adds every resolvable node and edge to state.G via the normal
     add_node/add_edge path, exactly as a Python infra.py would. Returns
     the list of BlockedItem for everything that couldn't be — pass it to
     plan(state, blocked=...) / run(state, blocked=...).
+
+    `base_dir` anchors file("…") values — pass the directory of the .giac
+    source (defaults to the current working directory). A missing file
+    raises FileNotFoundError: that's an authoring error, not a BLOCKED.
     """
+    from pathlib import Path
+
     from GraphIaC.main import add_edge, add_node
 
+    base = Path(base_dir) if base_dir else Path.cwd()
     blocked = []
     blocked_ids = set()
     models = {}
     live_cache = {}
 
-    def resolve_ref(ref):
-        g_id, field = ref["g_id"], ref["field"]
+    def resolve_file(fileref):
+        target = base / fileref["path"]
+        if not target.is_file():
+            raise FileNotFoundError(f'file("{fileref["path"]}") not found (looked in {base})')
+        return target.read_text()
+
+    def live_ready(g_id):
+        """The live state of a node, or _Blocked if it doesn't exist / isn't ready."""
         target = models.get(g_id)
         if target is None:
             raise _Blocked(f'waiting on "{g_id}" — {"blocked itself" if g_id in blocked_ids else "unknown node"}')
@@ -708,35 +745,61 @@ def load_graph(state, graph):
             raise _Blocked(f'waiting on "{g_id}" — not created yet')
         if not live.ready():
             raise _Blocked(f'waiting on "{g_id}" — exists but not ready')
-        val = getattr(live, field, None)
+        return live
+
+    def resolve_ref(ref):
+        live = live_ready(ref["g_id"])
+        val = getattr(live, ref["field"], None)
         if val is None:
-            raise _Blocked(f'waiting on "{g_id}.{field}" — no value yet')
+            raise _Blocked(f'waiting on "{ref["g_id"]}.{ref["field"]}" — no value yet')
         return val
 
-    # nodes: fixpoint iteration so ref targets instantiate before referrers,
-    # regardless of declaration order
+    # edges whose class declares gates_destination: the destination cannot be
+    # provisioned until the source's live state is ready() — the
+    # relationship-shaped twin of an attribute reference
+    gated = {}  # dest g_id -> (source g_id, edge type)
+    for e in graph["edges"]:
+        cls = state.models_map.get(e["type"])
+        if not (cls and getattr(cls, "gates_destination", False)):
+            continue
+        try:
+            probe = cls(**{k: v for k, v in e["fields"].items() if isinstance(v, str)})
+            gated[probe.destination_g_id] = (probe.source_g_id, e["type"])
+        except Exception:
+            pass  # malformed edge — it will fail on its own below
+
+    # nodes: fixpoint iteration so ref/gate targets instantiate before their
+    # dependents, regardless of declaration order
     pending = {n["g_id"]: n for n in graph["nodes"]}
     while pending:
         progress = False
         for g_id, n in list(pending.items()):
             refs = _collect_refs(n["fields"], [])
+            gate = gated.get(g_id)
             if any(r["g_id"] in pending and r["g_id"] != g_id for r in refs):
                 continue  # a ref target hasn't been decided yet — come back to this one
+            if gate and gate[0] in pending and gate[0] != g_id:
+                continue  # the gating source hasn't been decided yet
             del pending[g_id]
             progress = True
             try:
                 if any(r["g_id"] == g_id for r in refs):
                     raise _Blocked(f'"{g_id}" references itself')
-                fields = _substitute(n["fields"], resolve_ref)
+                if gate:
+                    try:
+                        live_ready(gate[0])
+                    except _Blocked as b:
+                        raise _Blocked(f"{b.reason} (required by {gate[1]})") from None
+                fields = _substitute(n["fields"], resolve_ref, resolve_file)
                 model = state.models_map[n["type"]](g_id=g_id, **fields)
                 models[g_id] = model
                 add_node(state, model)
             except _Blocked as b:
                 blocked.append(BlockedItem(g_id=g_id, type=n["type"], reason=b.reason))
                 blocked_ids.add(g_id)
-        if not progress:  # only circular references remain
+        if not progress:  # only circular dependencies remain
             for g_id, n in pending.items():
-                blocked.append(BlockedItem(g_id=g_id, type=n["type"], reason="circular attribute references"))
+                blocked.append(BlockedItem(g_id=g_id, type=n["type"], reason="circular dependencies"))
                 blocked_ids.add(g_id)
             break
 
@@ -744,7 +807,7 @@ def load_graph(state, graph):
     for e in graph["edges"]:
         label = e["type"]
         try:
-            fields = _substitute(e["fields"], resolve_ref)
+            fields = _substitute(e["fields"], resolve_ref, resolve_file)
             edge = state.models_map[e["type"]](**fields)
             label = f"{edge.source_g_id} → {edge.destination_g_id}"
             for endpoint in (edge.source_g_id, edge.destination_g_id):

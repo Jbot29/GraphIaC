@@ -43,7 +43,6 @@ class ApiEndpoint(BaseNode):
 
     @property
     def read_id(self) -> Optional[str]:
-        print(f"W: {self.method}")
         return _route_key_for_endpoint(self.path, self.method)
 
     @classmethod
@@ -101,7 +100,7 @@ class EndpointLambdaEdge(BaseEdge):
 
         r = get_route_lambda_attachment(session, site_node, endpoint.method, endpoint.path)
 
-        print(r)
+        logger.debug(f"route attachment: {r}")
         if not r["attached"]:
             return None
 
@@ -118,7 +117,7 @@ class EndpointLambdaEdge(BaseEdge):
         if not site_node:
             return None
 
-        print(f"L:{lambda_node}")
+        logger.debug(f"attaching lambda: {lambda_node}")
         attach_route_to_lambda(session, site_node, endpoint.method, endpoint.path, lambda_node.name)
 
 
@@ -195,7 +194,7 @@ def get_api_site(session: boto3.session.Session, g_id, name: str, region) -> Opt
     client = session.client("apigatewayv2", region_name=region)
     api = _find_api_by_name(client, name)
     if not api:
-        print(f"API GATEWAY NOT FOUND {name}")
+        logger.debug(f"API gateway not found: {name}")
         return None
 
     # Try to infer the "main" stage: prefer the requested name, else $default.

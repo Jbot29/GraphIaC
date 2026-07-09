@@ -45,12 +45,14 @@ NAME_FIELDS = {
 # This is the `a -> b` inference table: one edge per unordered node-type pair.
 EDGE_ENDPOINTS = {
     "ACMCertificateHostedZoneEdge": ("ACMCertificate", "cert_g_id", "HostedZone", "hz_g_id"),
+    "ACMCertificateCloudFrontEdge": ("ACMCertificate", "cert_g_id", "CloudFrontDistribution", "cf_g_id"),
     "CloudFrontS3OACEdge": ("CloudFrontDistribution", "cf_g_id", "S3Bucket", "s3_g_id"),
     "CloudFrontRoute53Edge": ("CloudFrontDistribution", "cf_g_id", "HostedZone", "hz_g_id"),
     "CloudFrontFunctionEdge": ("CloudFrontFunction", "fn_g_id", "CloudFrontDistribution", "cf_g_id"),
     "SiteEndpointEdge": ("ApiSite", "site_node_g_id", "ApiEndpoint", "endpoint_node_g_id"),
     "EndpointLambdaEdge": ("ApiEndpoint", "endpoint_node_g_id", "LambdaZipFile", "lambda_node_g_id"),
     "IAMRolePolicyLambdaEdge": ("IAMRole", "role_g_id", "LambdaZipFile", "node_g_id"),
+    "LambdaDynamoEdge": ("LambdaZipFile", "lambda_node_g_id", "DynamoTable", "dynamo_node_g_id"),
     "SESDomainRoute53Edge": ("SESDomainIdentity", "ses_g_id", "HostedZone", "zone_g_id"),
     "LambdaSESEdge": ("LambdaZipFile", "lambda_node_g_id", "SESDomainIdentity", "ses_node_g_id"),
 }

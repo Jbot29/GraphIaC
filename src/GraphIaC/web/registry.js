@@ -11,6 +11,24 @@
 "use strict";
 return {
   "edges": {
+    "ACMCertificateCloudFrontEdge": {
+      "dest": {
+        "field": "cf_g_id",
+        "type": "CloudFrontDistribution"
+      },
+      "fields": {
+        "cert_g_id": {
+          "required": true
+        },
+        "cf_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "cert_g_id",
+        "type": "ACMCertificate"
+      }
+    },
     "ACMCertificateHostedZoneEdge": {
       "dest": {
         "field": "hz_g_id",
@@ -129,6 +147,31 @@ return {
       "source": {
         "field": "role_g_id",
         "type": "IAMRole"
+      }
+    },
+    "LambdaDynamoEdge": {
+      "dest": {
+        "field": "dynamo_node_g_id",
+        "type": "DynamoTable"
+      },
+      "fields": {
+        "dynamo_node_g_id": {
+          "required": true
+        },
+        "lambda_node_g_id": {
+          "required": true
+        },
+        "policy_doc": {
+          "default": null,
+          "required": false
+        },
+        "role_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "lambda_node_g_id",
+        "type": "LambdaZipFile"
       }
     },
     "LambdaSESEdge": {
@@ -282,7 +325,8 @@ return {
           "required": false
         },
         "cert_arn": {
-          "required": true
+          "default": null,
+          "required": false
         },
         "default_root_object": {
           "default": "index.html",

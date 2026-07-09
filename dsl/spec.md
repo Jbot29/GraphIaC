@@ -156,17 +156,34 @@ A bare node label used as a value (like `role` above) resolves to that node's
 | source type            | destination type       | edge                          |
 |------------------------|------------------------|-------------------------------|
 | `ACMCertificate`       | `HostedZone`           | `ACMCertificateHostedZoneEdge`|
+| `ACMCertificate`       | `CloudFrontDistribution` | `ACMCertificateCloudFrontEdge` ⊘ |
 | `CloudFrontDistribution` | `S3Bucket`           | `CloudFrontS3OACEdge`         |
 | `CloudFrontDistribution` | `HostedZone`         | `CloudFrontRoute53Edge`       |
 | `CloudFrontFunction`   | `CloudFrontDistribution` | `CloudFrontFunctionEdge`    |
 | `ApiSite`              | `ApiEndpoint`          | `SiteEndpointEdge`            |
 | `ApiEndpoint`          | `LambdaZipFile`        | `EndpointLambdaEdge`          |
 | `IAMRole`              | `LambdaZipFile`        | `IAMRolePolicyLambdaEdge`     |
+| `LambdaZipFile`        | `DynamoTable`          | `LambdaDynamoEdge`            |
 | `SESDomainIdentity`    | `HostedZone`           | `SESDomainRoute53Edge`        |
 | `LambdaZipFile`        | `SESDomainIdentity`    | `LambdaSESEdge`               |
 
 This table is not hand-maintained in two places — it is generated from the
 registry (below).
+
+### Gating edges (⊘)
+
+Some relationships are also *prerequisites*: a CloudFront distribution
+cannot even be created until its certificate is ISSUED. An edge class may
+declare `gates_destination`, meaning the planner holds the destination node
+(and everything touching it) **BLOCKED** until the source's live state is
+`ready()`. This is the relationship-shaped twin of an attribute reference:
+refs block on *data* (`cert.arn` has no value yet); gating edges block on a
+*declared dependency* (the arrow itself). Prefer the edge when the
+relationship exists anyway — no ARN plumbing in your config:
+
+```
+cert -> cf        # viewer certificate; cf stays BLOCKED until cert is ISSUED
+```
 
 ---
 
@@ -188,6 +205,25 @@ This is what replaces the imperative two-phase pattern (`read()` the cert,
 always declared; readiness is the planner's problem, not the author's.
 
 ---
+
+## Files — code rides along
+
+Some fields *are* code — a CloudFront function's JavaScript, a policy
+document. The DSL has no multiline strings; code lives in its own file,
+next to the source, and is referenced:
+
+```
+fn : CloudFrontFunction(name: "url-rewrite", function_code: file("url-rewrite.js"))
+```
+
+`file(...)` takes one quoted path, relative to the `.giac` source file.
+Parsing never touches the disk — the value stays symbolic (`$file`) in the
+graph, so the browser sandbox works without filesystem access; the
+**engine** reads the file at load time. A missing file is an authoring
+error (load fails), not a BLOCKED.
+
+`file` is only special immediately before `(` — it remains usable as a
+label or constant name.
 
 ## BLOCKED — the planner handles time
 
@@ -279,9 +315,10 @@ my-test-bucket : S3Bucket(region: "us-east-2")
 ### Static site — Route53 -> CloudFront (HTTPS) -> S3
 
 The full stack from `examples/static-site/infra.py`, including its two-phase
-ACM dance — with no phases in the source. On the first run `cert` and `hz`
-provision and everything below `cf` is `BLOCKED` on `cert.arn` / the cert
-reaching `ISSUED`. Run again after validation and the rest comes up.
+ACM dance — with no phases and no ARN plumbing in the source. On the first
+run `cert`, `hz`, and `bucket` provision; the `cert -> cf` gating edge holds
+`cf` and its edges `BLOCKED` until the cert reaches `ISSUED`. Run again
+after validation and the rest comes up, the edge wiring the certificate in.
 
 ```
 domain = "begrif.co"
@@ -289,15 +326,16 @@ domain = "begrif.co"
 hz     : HostedZone(domain_name: domain)
 cert   : ACMCertificate(domain_name: domain)
 bucket : S3Bucket("begrif-co-site")
-cf     : CloudFrontDistribution(domain_name: domain, cert_arn: cert.arn)
+cf     : CloudFrontDistribution(domain_name: domain)
 
 cert -> hz                        # validation CNAMEs, automatically
+cert -> cf                        # viewer certificate (gates cf until ISSUED)
 cf   -> bucket                    # OAC: only this distribution can read
 cf   -> hz : (domain_name: domain)  # A alias record
 ```
 
-Nine lines. The Python version is ~50, and half of it is the phase logic the
-planner now owns.
+Ten lines. The Python version is ~50, half of it phase logic the planner
+now owns — and every resource relationship is an arrow, not a field.
 
 ### An API — Gateway -> Lambda, with a role
 
@@ -323,6 +361,12 @@ otherwise write by hand.
 - **Guard blocks** (`when cert.status == "ISSUED" { … }`) — declarative
   conditionals. Deferred to see whether `BLOCKED` + attribute references
   cover every real case; so far they do.
+- **Queries / guards (`?`)** — verification in the language: Prolog-style
+  statements declaring safety invariants as facts the source must satisfy
+  (`? private(bucket)`, or a guard trailing the statement it protects).
+  Evaluated live in the sandbox, checked by `verify` against AWS, possibly
+  gating `run`. The `verify()` machinery exists; the language surface is
+  deferred until the invariant vocabulary firms up.
 - **Arrow chaining** (`api -> hello -> handler`) — sugar for consecutive
   edges. Cheap, but nothing forces it yet.
 - **String interpolation** (`"${domain}-site"`) — until a script repeats

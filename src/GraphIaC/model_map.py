@@ -1,6 +1,7 @@
 from GraphIaC.aws.apigateway import ApiEndpoint, ApiSite, EndpointLambdaEdge, SiteEndpointEdge
 from GraphIaC.aws.certificate import ACMCertificate, ACMCertificateHostedZoneEdge
 from GraphIaC.aws.cloudfront import (
+    ACMCertificateCloudFrontEdge,
     CloudFrontDistribution,
     CloudFrontFunction,
     CloudFrontFunctionEdge,
@@ -12,6 +13,7 @@ from GraphIaC.aws.ec2.alb import ALB
 from GraphIaC.aws.ec2.listener import Listener
 from GraphIaC.aws.ec2_sg import SecurityGroup
 from GraphIaC.aws.iam_role import IAMRole, IAMRoleInlinePolicyEdge, IAMRolePolicyEdge
+from GraphIaC.aws.lambda_dynamodb import LambdaDynamoEdge
 from GraphIaC.aws.lambda_func import IAMRolePolicyLambdaEdge, LambdaZipFile
 from GraphIaC.aws.route53 import HostedZone, Route53AliasRecord
 from GraphIaC.aws.s3 import S3Bucket
@@ -25,6 +27,7 @@ BASE_MODEL_MAP = {
     "Route53AliasRecord": Route53AliasRecord,
     "ACMCertificate": ACMCertificate,
     "ACMCertificateHostedZoneEdge": ACMCertificateHostedZoneEdge,
+    "ACMCertificateCloudFrontEdge": ACMCertificateCloudFrontEdge,
     "S3Bucket": S3Bucket,
     "CloudFrontDistribution": CloudFrontDistribution,
     "CloudFrontFunction": CloudFrontFunction,
@@ -42,6 +45,7 @@ BASE_MODEL_MAP = {
     "ALB": ALB,
     "Listener": Listener,
     "DynamoTable": DynamoTable,
+    "LambdaDynamoEdge": LambdaDynamoEdge,
     "ApiSite": ApiSite,
     "ApiEndpoint": ApiEndpoint,
     "SESDomainIdentity": SESDomainIdentity,

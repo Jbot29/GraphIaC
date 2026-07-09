@@ -1,0 +1,12 @@
+# the canonical static site: no ARN passing anywhere — cert -> cf is an edge
+domain = "x.co"
+
+hz     : HostedZone(domain_name: domain)
+cert   : ACMCertificate(domain_name: domain)
+bucket : S3Bucket("x-co-site")
+cf     : CloudFrontDistribution(domain_name: domain)
+
+cert -> hz
+cert -> cf
+cf   -> bucket
+cf   -> hz : (domain_name: domain)

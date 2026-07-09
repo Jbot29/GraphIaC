@@ -1,0 +1,6 @@
+cert-arn = "arn:aws:acm:us-east-1:123:certificate/x"
+
+cf : CloudFrontDistribution(domain_name: "x.co", cert_arn: cert-arn)
+fn : CloudFrontFunction(name: "rewrite", function_code: file("fn.js"))
+
+fn -> cf

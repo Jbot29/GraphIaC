@@ -86,7 +86,11 @@ class Api:
             return None, None, (400, {"errors": res["errors"], "warnings": res["warnings"]})
         conn = sqlite3.connect(self.db_path)
         state = GraphIaC.init(self.session, conn)
-        blocked = dsl.load_graph(state, res["graph"])
+        try:
+            blocked = dsl.load_graph(state, res["graph"], base_dir=self.infra_path.parent)
+        except FileNotFoundError as e:
+            conn.close()
+            return None, None, (400, {"error": str(e)})
         return state, blocked, None
 
     def _engine(self, body, fn):
