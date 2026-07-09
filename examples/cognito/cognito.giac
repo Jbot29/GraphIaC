@@ -1,0 +1,24 @@
+# Cognito: a user pool + app client for putting auth in front of a web UI.
+#
+# The pool defaults are locked down for the self-hosted-UI use case:
+# self-signup disabled (an admin creates users), email sign-in,
+# 12-char password minimum, deletion protection. `verify` audits all
+# of that:
+#
+#   python -m GraphIaC <aws-profile> --infra_file cognito.giac run
+#   python -m GraphIaC <aws-profile> --infra_file cognito.giac verify
+#
+# The users -> ui edge provisions the app client on the pool: SRP +
+# refresh-token auth, and — because callback_urls is set — the OAuth
+# code flow a hosted login page needs. The client id lands on the
+# client node after run.
+#
+# Create your first user (no self-signup, so this is the admin's job):
+#   aws cognito-idp admin-create-user --user-pool-id <pool_id> \
+#       --username you@example.com --profile <aws-profile>
+
+users : CognitoUserPool(region: "us-east-2")
+ui    : CognitoUserPoolClient(callback_urls: ["https://example.com/callback"],
+                              logout_urls: ["https://example.com/"])
+
+users -> ui

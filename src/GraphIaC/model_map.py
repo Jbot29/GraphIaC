@@ -8,6 +8,7 @@ from GraphIaC.aws.cloudfront import (
     CloudFrontRoute53Edge,
     CloudFrontS3OACEdge,
 )
+from GraphIaC.aws.cognito import CognitoPoolClientEdge, CognitoUserPool, CognitoUserPoolClient
 from GraphIaC.aws.dynamodb import DynamoTable
 from GraphIaC.aws.ec2.alb import ALB
 from GraphIaC.aws.ec2.listener import Listener
@@ -44,6 +45,9 @@ BASE_MODEL_MAP = {
     "SecurityGroup": SecurityGroup,
     "ALB": ALB,
     "Listener": Listener,
+    "CognitoUserPool": CognitoUserPool,
+    "CognitoUserPoolClient": CognitoUserPoolClient,
+    "CognitoPoolClientEdge": CognitoPoolClientEdge,
     "DynamoTable": DynamoTable,
     "LambdaDynamoEdge": LambdaDynamoEdge,
     "ApiSite": ApiSite,

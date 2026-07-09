@@ -1,0 +1,30 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "users",
+        "type": "CognitoUserPool",
+        "fields": { "region": "us-east-2", "pool_name": "users" },
+        "line": 2
+      },
+      {
+        "g_id": "ui",
+        "type": "CognitoUserPoolClient",
+        "fields": {
+          "callback_urls": ["https://ui.example.com/callback"],
+          "client_name": "ui"
+        },
+        "line": 3
+      }
+    ],
+    "edges": [
+      {
+        "type": "CognitoPoolClientEdge",
+        "fields": { "pool_g_id": "users", "client_g_id": "ui" },
+        "inferred": true,
+        "line": 5
+      }
+    ]
+  },
+  "errors": []
+}
