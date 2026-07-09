@@ -38,13 +38,11 @@ class IAMRole(BaseNode):
         return self.name
 
     def exists(self, session):
-        print(f"{self.__class__.__name__}: Exists {self}")
         if role_exists(session, self.name):
             return True
         return False
 
     def create(self, session, G):
-        print(f"{self.__class__.__name__}: Create {self}")
         role_arn = role_create(session, self.name, self.trust_policy)
 
         if not role_arn:
