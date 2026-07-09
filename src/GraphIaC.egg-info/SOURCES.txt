@@ -4,11 +4,13 @@ pyproject.toml
 src/GraphIaC/__init__.py
 src/GraphIaC/__main__.py
 src/GraphIaC/db.py
+src/GraphIaC/dsl.py
 src/GraphIaC/dsl_registry.py
 src/GraphIaC/logs.py
 src/GraphIaC/main.py
 src/GraphIaC/model_map.py
 src/GraphIaC/models.py
+src/GraphIaC/server.py
 src/GraphIaC/setup.py
 src/GraphIaC.egg-info/PKG-INFO
 src/GraphIaC.egg-info/SOURCES.txt
@@ -49,3 +51,7 @@ src/GraphIac/aws/lambda_func.py
 src/GraphIac/aws/route53.py
 src/GraphIac/aws/s3.py
 src/GraphIac/aws/types.py
+tests/test_dsl.py
+tests/test_dsl_load.py
+tests/test_edge_reads.py
+tests/test_server.py
