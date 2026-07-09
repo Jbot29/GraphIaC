@@ -342,6 +342,12 @@ otherwise write by hand.
 - **Guard blocks** (`when cert.status == "ISSUED" { … }`) — declarative
   conditionals. Deferred to see whether `BLOCKED` + attribute references
   cover every real case; so far they do.
+- **Queries / guards (`?`)** — verification in the language: Prolog-style
+  statements declaring safety invariants as facts the source must satisfy
+  (`? private(bucket)`, or a guard trailing the statement it protects).
+  Evaluated live in the sandbox, checked by `verify` against AWS, possibly
+  gating `run`. The `verify()` machinery exists; the language surface is
+  deferred until the invariant vocabulary firms up.
 - **Arrow chaining** (`api -> hello -> handler`) — sugar for consecutive
   edges. Cheap, but nothing forces it yet.
 - **String interpolation** (`"${domain}-site"`) — until a script repeats
