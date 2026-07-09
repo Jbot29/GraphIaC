@@ -51,6 +51,7 @@ EDGE_ENDPOINTS = {
     "SiteEndpointEdge": ("ApiSite", "site_node_g_id", "ApiEndpoint", "endpoint_node_g_id"),
     "EndpointLambdaEdge": ("ApiEndpoint", "endpoint_node_g_id", "LambdaZipFile", "lambda_node_g_id"),
     "IAMRolePolicyLambdaEdge": ("IAMRole", "role_g_id", "LambdaZipFile", "node_g_id"),
+    "LambdaDynamoEdge": ("LambdaZipFile", "lambda_node_g_id", "DynamoTable", "dynamo_node_g_id"),
     "SESDomainRoute53Edge": ("SESDomainIdentity", "ses_g_id", "HostedZone", "zone_g_id"),
     "LambdaSESEdge": ("LambdaZipFile", "lambda_node_g_id", "SESDomainIdentity", "ses_node_g_id"),
 }

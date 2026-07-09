@@ -1,0 +1,6 @@
+role  : IAMRole
+fn    : LambdaZipFile(runtime: "python3.12", handler: "h.h", zip_file_path: "fn.zip")
+table : DynamoTable(partition_key: {name: "id", attr_type: "S"})
+
+role -> fn
+fn -> table : (role_g_id: role)

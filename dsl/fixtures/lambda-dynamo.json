@@ -1,0 +1,47 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "role",
+        "type": "IAMRole",
+        "fields": { "name": "role" },
+        "line": 1
+      },
+      {
+        "g_id": "fn",
+        "type": "LambdaZipFile",
+        "fields": {
+          "runtime": "python3.12",
+          "handler": "h.h",
+          "zip_file_path": "fn.zip",
+          "name": "fn"
+        },
+        "line": 2
+      },
+      {
+        "g_id": "table",
+        "type": "DynamoTable",
+        "fields": {
+          "partition_key": { "name": "id", "attr_type": "S" },
+          "table_name": "table"
+        },
+        "line": 3
+      }
+    ],
+    "edges": [
+      {
+        "type": "IAMRolePolicyLambdaEdge",
+        "fields": { "role_g_id": "role", "node_g_id": "fn" },
+        "inferred": true,
+        "line": 5
+      },
+      {
+        "type": "LambdaDynamoEdge",
+        "fields": { "lambda_node_g_id": "fn", "dynamo_node_g_id": "table", "role_g_id": "role" },
+        "inferred": true,
+        "line": 6
+      }
+    ]
+  },
+  "errors": []
+}

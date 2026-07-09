@@ -131,6 +131,31 @@ return {
         "type": "IAMRole"
       }
     },
+    "LambdaDynamoEdge": {
+      "dest": {
+        "field": "dynamo_node_g_id",
+        "type": "DynamoTable"
+      },
+      "fields": {
+        "dynamo_node_g_id": {
+          "required": true
+        },
+        "lambda_node_g_id": {
+          "required": true
+        },
+        "policy_doc": {
+          "default": null,
+          "required": false
+        },
+        "role_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "lambda_node_g_id",
+        "type": "LambdaZipFile"
+      }
+    },
     "LambdaSESEdge": {
       "dest": {
         "field": "ses_node_g_id",

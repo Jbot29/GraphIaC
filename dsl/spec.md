@@ -162,6 +162,7 @@ A bare node label used as a value (like `role` above) resolves to that node's
 | `ApiSite`              | `ApiEndpoint`          | `SiteEndpointEdge`            |
 | `ApiEndpoint`          | `LambdaZipFile`        | `EndpointLambdaEdge`          |
 | `IAMRole`              | `LambdaZipFile`        | `IAMRolePolicyLambdaEdge`     |
+| `LambdaZipFile`        | `DynamoTable`          | `LambdaDynamoEdge`            |
 | `SESDomainIdentity`    | `HostedZone`           | `SESDomainRoute53Edge`        |
 | `LambdaZipFile`        | `SESDomainIdentity`    | `LambdaSESEdge`               |
 
