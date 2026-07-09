@@ -34,9 +34,10 @@ domain = "example.com"
 hz     : HostedZone(domain_name: domain)
 cert   : ACMCertificate(domain_name: domain)
 bucket : S3Bucket("example-com-site")
-cf     : CloudFrontDistribution(domain_name: domain, cert_arn: cert.arn)
+cf     : CloudFrontDistribution(domain_name: domain)
 
 cert -> hz          # DNS validation records, automatically
+cert -> cf          # viewer certificate; cf waits until the cert is ISSUED
 cf   -> bucket      # OAC: only this distribution can read the bucket
 cf   -> hz : (domain_name: domain)   # A alias record
 ```
@@ -86,7 +87,7 @@ other.field                 # an attribute reference — a data dependency
 
 **Edge inference:** every edge is uniquely determined by its endpoints — `cf -> bucket` can only mean the OAC edge, `cert -> hz` only DNS validation. You point; the edge knows. Arrow direction doesn't matter; the parser normalizes it.
 
-**Slow resources & BLOCKED:** some resources take hours to become usable (ACM certificate validation is the classic). There is no phase logic in the source. A reference like `cert.arn` resolves from live AWS state; until the certificate is ISSUED, everything depending on it is reported **`⊘ BLOCKED`** (greyed out in the diagram) and simply skipped. Run again later and the planner picks up where AWS left off.
+**Slow resources & BLOCKED:** some resources take hours to become usable (ACM certificate validation is the classic). There is no phase logic in the source. An edge can *gate* its destination — `cert -> cf` holds the distribution **`⊘ BLOCKED`** (greyed out in the diagram) until the certificate is ISSUED — and an attribute reference like `cert.arn` blocks the same way until it resolves from live AWS state. Blocked resources are simply skipped; run again later and the planner picks up where AWS left off.
 
 ## Headless CLI (no UI)
 

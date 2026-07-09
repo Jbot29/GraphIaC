@@ -94,25 +94,26 @@
     <div class="col">
       <div class="panel-label"><span>Source</span><span class="hint">label : Type(…) · a -&gt; b · other.field</span></div>
       <textarea id="editor" spellcheck="false"># Static site: Route53 -> CloudFront (HTTPS) -> S3.
-# The arrows are the point: each one is an IAM policy or a service
-# integration the edge already knows how to provision.
+# The arrows are the point: each one is an IAM policy, a certificate
+# attachment, or a service integration the edge knows how to provision.
 #
 #   cert -> hz      DNS validation records, automatically
+#   cert -> cf      the viewer certificate — and a GATE: cf stays
+#                   BLOCKED until the cert is ISSUED (no phase logic)
 #   cf -> bucket    an OAC bucket policy: only this distribution can read
 #   cf -> hz        the A alias record for the domain
 #
-# cert_arn: cert.arn is a DATA DEPENDENCY (dashed in the diagram) — the
-# planner resolves it from live state, and everything downstream stays
-# BLOCKED until the certificate is ISSUED. No phase logic in the source.
+# No ARNs anywhere: relationships are arrows, not fields.
 
 domain = "begrif.co"
 
 hz     : HostedZone(domain_name: domain)
 cert   : ACMCertificate(domain_name: domain)
 bucket : S3Bucket("begrif-co-site")
-cf     : CloudFrontDistribution(domain_name: domain, cert_arn: cert.arn)
+cf     : CloudFrontDistribution(domain_name: domain)
 
 cert -> hz
+cert -> cf
 cf   -> bucket
 cf   -> hz : (domain_name: domain)
 </textarea>

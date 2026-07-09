@@ -1,5 +1,5 @@
 import json
-from typing import Optional
+from typing import ClassVar, Optional
 
 from botocore.exceptions import ClientError
 
@@ -15,7 +15,9 @@ _CACHING_OPTIMIZED_POLICY_ID = "658327ea-f89d-4fab-a63d-7e88639e58f6"
 
 class CloudFrontDistribution(BaseNode):
     domain_name: str          # custom domain alias, e.g. "begriff.co"
-    cert_arn: str             # ACM certificate ARN (must be us-east-1)
+    # ACM certificate ARN (us-east-1). Usually left unset: an
+    # ACMCertificateCloudFrontEdge (cert -> cf) supplies it from the graph.
+    cert_arn: Optional[str] = None
     distribution_id: Optional[str] = None
     distribution_domain_name: Optional[str] = None  # e.g. "xxxx.cloudfront.net"
     arn: Optional[str] = None
@@ -86,6 +88,17 @@ class CloudFrontDistribution(BaseNode):
         if s3_bucket is None:
             raise ValueError(
                 f"CloudFrontDistribution {self.g_id} requires an S3Bucket neighbor in the graph"
+            )
+
+        # The viewer certificate comes from the connected ACMCertificate
+        # (cert -> cf edge) when not set explicitly — same discovery pattern
+        # as the S3 origin above.
+        if not self.cert_arn:
+            self.cert_arn = _cert_arn_from_graph(session, G, self.g_id)
+        if not self.cert_arn:
+            raise ValueError(
+                f"CloudFrontDistribution {self.g_id} needs a certificate — connect an "
+                f"ACMCertificate (cert -> {self.g_id}) or set cert_arn"
             )
 
         cf = session.client("cloudfront")
@@ -256,6 +269,125 @@ class CloudFrontDistribution(BaseNode):
         except ClientError as e:
             logger.error(f"Failed to delete CloudFront distribution {self.distribution_id}: {e}")
             raise
+
+
+def _cert_arn_from_graph(session, G, cf_g_id):
+    """The ARN of the ACMCertificate connected to this distribution, from the
+    node's own arn if populated, else from live ACM state."""
+    for other in list(G.predecessors(cf_g_id)) + list(G.neighbors(cf_g_id)):
+        node = G.nodes[other]["data"]
+        if node.__class__.__name__ != "ACMCertificate":
+            continue
+        if node.arn:
+            return node.arn
+        live = node.read(session, G, node.g_id, node.read_id)
+        if live and live.arn:
+            return live.arn
+    return None
+
+
+class ACMCertificateCloudFrontEdge(BaseEdge):
+    """Attaches an ACMCertificate to a CloudFrontDistribution as its viewer
+    certificate (cert -> cf). The edge owns the wiring: the distribution node
+    never needs a cert_arn in user config — create() discovers it through
+    this edge, and this edge asserts/repairs the attachment afterwards.
+
+    gates_destination: a distribution cannot exist without an ISSUED
+    certificate, so the DSL planner holds the distribution BLOCKED until the
+    cert's live state is ready().
+    """
+
+    gates_destination: ClassVar[bool] = True
+
+    cert_g_id: str
+    cf_g_id: str
+
+    @property
+    def source_g_id(self):
+        return self.cert_g_id
+
+    @property
+    def destination_g_id(self):
+        return self.cf_g_id
+
+    def _attached_arn(self, session, distribution_id):
+        cf = session.client("cloudfront")
+        resp = cf.get_distribution_config(Id=distribution_id)
+        return resp["DistributionConfig"].get("ViewerCertificate", {}).get("ACMCertificateArn"), resp
+
+    def read(self, session, G):
+        cf_node = G.nodes[self.cf_g_id]["data"]
+        if not cf_node.distribution_id:
+            return None
+        cert_arn = _cert_arn_from_graph(session, G, self.cf_g_id)
+        if not cert_arn:
+            return None
+        try:
+            attached, _ = self._attached_arn(session, cf_node.distribution_id)
+        except ClientError as e:
+            logger.error(f"Error reading viewer certificate: {e}")
+            return None
+        return self if attached == cert_arn else None
+
+    def create(self, session, G):
+        cf_node = G.nodes[self.cf_g_id]["data"]
+        cert_arn = _cert_arn_from_graph(session, G, self.cf_g_id)
+
+        if not cf_node.distribution_id or not cert_arn:
+            logger.warning("Distribution or certificate not available yet; skipping viewer-certificate attachment")
+            return
+
+        attached, resp = self._attached_arn(session, cf_node.distribution_id)
+        if attached == cert_arn:
+            # the usual case: create() already wired it via the graph
+            logger.info(f"Viewer certificate already attached to {cf_node.distribution_id}")
+            return True
+
+        config = resp["DistributionConfig"]
+        config["ViewerCertificate"] = {
+            "ACMCertificateArn": cert_arn,
+            "SSLSupportMethod": "sni-only",
+            "MinimumProtocolVersion": "TLSv1.2_2021",
+        }
+        cf = session.client("cloudfront")
+        cf.update_distribution(Id=cf_node.distribution_id, DistributionConfig=config, IfMatch=resp["ETag"])
+        logger.info(f"Attached certificate {cert_arn} to distribution {cf_node.distribution_id}")
+        return True
+
+    def update(self, session, G):
+        return self.create(session, G)
+
+    def delete(self, session, G):
+        # A distribution with aliases always needs a certificate — removing the
+        # attachment only makes sense when the distribution itself goes.
+        pass
+
+    def verify(self, session, G) -> list:
+        cf_node = G.nodes[self.cf_g_id]["data"]
+        cert_node = G.nodes[self.cert_g_id]["data"]
+        if not cf_node.distribution_id:
+            return [VerifyResult(name="Viewer certificate", passed=False,
+                                 message="distribution not created yet")]
+        results = []
+        try:
+            attached, _ = self._attached_arn(session, cf_node.distribution_id)
+            expected = _cert_arn_from_graph(session, G, self.cf_g_id)
+            results.append(VerifyResult(
+                name="Viewer certificate attached",
+                passed=bool(expected) and attached == expected,
+                message=f"{attached}" if attached == expected else
+                        f"attached '{attached}', expected '{expected}'",
+            ))
+            live_cert = cert_node.read(session, G, cert_node.g_id, cert_node.read_id)
+            issued = bool(live_cert) and live_cert.status == "ISSUED"
+            results.append(VerifyResult(
+                name="Certificate is ISSUED",
+                passed=issued,
+                message=live_cert.status if live_cert else "certificate not found",
+            ))
+        except ClientError as e:
+            results.append(VerifyResult(name="Viewer certificate", passed=False, message=str(e)))
+        return results
 
 
 class CloudFrontS3OACEdge(BaseEdge):

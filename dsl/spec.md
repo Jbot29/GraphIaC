@@ -156,6 +156,7 @@ A bare node label used as a value (like `role` above) resolves to that node's
 | source type            | destination type       | edge                          |
 |------------------------|------------------------|-------------------------------|
 | `ACMCertificate`       | `HostedZone`           | `ACMCertificateHostedZoneEdge`|
+| `ACMCertificate`       | `CloudFrontDistribution` | `ACMCertificateCloudFrontEdge` ⊘ |
 | `CloudFrontDistribution` | `S3Bucket`           | `CloudFrontS3OACEdge`         |
 | `CloudFrontDistribution` | `HostedZone`         | `CloudFrontRoute53Edge`       |
 | `CloudFrontFunction`   | `CloudFrontDistribution` | `CloudFrontFunctionEdge`    |
@@ -168,6 +169,21 @@ A bare node label used as a value (like `role` above) resolves to that node's
 
 This table is not hand-maintained in two places — it is generated from the
 registry (below).
+
+### Gating edges (⊘)
+
+Some relationships are also *prerequisites*: a CloudFront distribution
+cannot even be created until its certificate is ISSUED. An edge class may
+declare `gates_destination`, meaning the planner holds the destination node
+(and everything touching it) **BLOCKED** until the source's live state is
+`ready()`. This is the relationship-shaped twin of an attribute reference:
+refs block on *data* (`cert.arn` has no value yet); gating edges block on a
+*declared dependency* (the arrow itself). Prefer the edge when the
+relationship exists anyway — no ARN plumbing in your config:
+
+```
+cert -> cf        # viewer certificate; cf stays BLOCKED until cert is ISSUED
+```
 
 ---
 
@@ -299,9 +315,10 @@ my-test-bucket : S3Bucket(region: "us-east-2")
 ### Static site — Route53 -> CloudFront (HTTPS) -> S3
 
 The full stack from `examples/static-site/infra.py`, including its two-phase
-ACM dance — with no phases in the source. On the first run `cert` and `hz`
-provision and everything below `cf` is `BLOCKED` on `cert.arn` / the cert
-reaching `ISSUED`. Run again after validation and the rest comes up.
+ACM dance — with no phases and no ARN plumbing in the source. On the first
+run `cert`, `hz`, and `bucket` provision; the `cert -> cf` gating edge holds
+`cf` and its edges `BLOCKED` until the cert reaches `ISSUED`. Run again
+after validation and the rest comes up, the edge wiring the certificate in.
 
 ```
 domain = "begrif.co"
@@ -309,15 +326,16 @@ domain = "begrif.co"
 hz     : HostedZone(domain_name: domain)
 cert   : ACMCertificate(domain_name: domain)
 bucket : S3Bucket("begrif-co-site")
-cf     : CloudFrontDistribution(domain_name: domain, cert_arn: cert.arn)
+cf     : CloudFrontDistribution(domain_name: domain)
 
 cert -> hz                        # validation CNAMEs, automatically
+cert -> cf                        # viewer certificate (gates cf until ISSUED)
 cf   -> bucket                    # OAC: only this distribution can read
 cf   -> hz : (domain_name: domain)  # A alias record
 ```
 
-Nine lines. The Python version is ~50, and half of it is the phase logic the
-planner now owns.
+Ten lines. The Python version is ~50, half of it phase logic the planner
+now owns — and every resource relationship is an arrow, not a field.
 
 ### An API — Gateway -> Lambda, with a role
 

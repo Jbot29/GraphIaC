@@ -11,6 +11,24 @@
 "use strict";
 return {
   "edges": {
+    "ACMCertificateCloudFrontEdge": {
+      "dest": {
+        "field": "cf_g_id",
+        "type": "CloudFrontDistribution"
+      },
+      "fields": {
+        "cert_g_id": {
+          "required": true
+        },
+        "cf_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "cert_g_id",
+        "type": "ACMCertificate"
+      }
+    },
     "ACMCertificateHostedZoneEdge": {
       "dest": {
         "field": "hz_g_id",
@@ -307,7 +325,8 @@ return {
           "required": false
         },
         "cert_arn": {
-          "required": true
+          "default": null,
+          "required": false
         },
         "default_root_object": {
           "default": "index.html",

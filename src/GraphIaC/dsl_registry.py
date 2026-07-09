@@ -45,6 +45,7 @@ NAME_FIELDS = {
 # This is the `a -> b` inference table: one edge per unordered node-type pair.
 EDGE_ENDPOINTS = {
     "ACMCertificateHostedZoneEdge": ("ACMCertificate", "cert_g_id", "HostedZone", "hz_g_id"),
+    "ACMCertificateCloudFrontEdge": ("ACMCertificate", "cert_g_id", "CloudFrontDistribution", "cf_g_id"),
     "CloudFrontS3OACEdge": ("CloudFrontDistribution", "cf_g_id", "S3Bucket", "s3_g_id"),
     "CloudFrontRoute53Edge": ("CloudFrontDistribution", "cf_g_id", "HostedZone", "hz_g_id"),
     "CloudFrontFunctionEdge": ("CloudFrontFunction", "fn_g_id", "CloudFrontDistribution", "cf_g_id"),

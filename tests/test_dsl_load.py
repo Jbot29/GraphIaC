@@ -56,11 +56,15 @@ class FakeEdge(BaseEdge):
         return self.b_g_id
 
 
+class GatedFakeEdge(FakeEdge):
+    gates_destination: ClassVar[bool] = True
+
+
 @pytest.fixture
 def state():
     FakeNode.LIVE = {}
     s = GraphIaC.init(None, sqlite3.connect(":memory:"))
-    s.models_map = {"FakeNode": FakeNode, "FakeEdge": FakeEdge}
+    s.models_map = {"FakeNode": FakeNode, "FakeEdge": FakeEdge, "GatedFakeEdge": GatedFakeEdge}
     return s
 
 
@@ -165,6 +169,39 @@ def test_self_ref_blocks(state):
     assert "references itself" in blocked[0].reason
 
 
+def gated_edge(a, b):
+    return {"type": "GatedFakeEdge", "fields": {"a_g_id": a, "b_g_id": b}, "inferred": True, "line": 9}
+
+
+def test_gating_edge_blocks_destination_until_source_exists(state):
+    g = graph([node("a"), node("b")], [gated_edge("a", "b")])
+    blocked = dsl.load_graph(state, g)
+    reasons = {x.g_id: x.reason for x in blocked}
+    assert "not created yet (required by GatedFakeEdge)" in reasons["b"]
+    assert "a → b" in reasons  # the edge itself is blocked because b is
+    assert "a" in state.G and "b" not in state.G
+
+
+def test_gating_edge_blocks_destination_until_source_ready(state):
+    FakeNode.LIVE["a"] = FakeNode(g_id="a", is_ready=False)
+    blocked = dsl.load_graph(state, graph([node("a"), node("b")], [gated_edge("a", "b")]))
+    assert "exists but not ready (required by GatedFakeEdge)" in blocked[0].reason
+
+
+def test_gating_edge_releases_when_source_ready(state):
+    FakeNode.LIVE["a"] = FakeNode(g_id="a", is_ready=True)
+    blocked = dsl.load_graph(state, graph([node("a"), node("b")], [gated_edge("a", "b")]))
+    assert blocked == []
+    assert ("a", "b") in state.G.edges
+
+
+def test_gating_and_declaration_order(state):
+    # destination declared before its gate source: fixpoint still orders them
+    FakeNode.LIVE["a"] = FakeNode(g_id="a")
+    blocked = dsl.load_graph(state, graph([node("b"), node("a")], [gated_edge("a", "b")]))
+    assert blocked == []
+
+
 def test_file_values_resolve_at_load_time(state, tmp_path):
     (tmp_path / "code.js").write_text("function handler(e) { return e.request; }")
     g = graph([node("a", {"dep_arn": {"$file": {"path": "code.js"}}})])
@@ -241,6 +278,42 @@ def test_giac_bucket_plan_run_converges(aws):
     # second run from scratch: nothing to do
     state, blocked = load_giac(session, conn, src)
     assert GraphIaC.plan(state, blocked) == []
+
+
+def test_cert_edge_gates_distribution_end_to_end(aws):
+    """The canonical no-cert_arn form: cert -> cf gates the distribution,
+    and create() discovers the ARN through the graph."""
+    session, conn = aws
+    src = (
+        'bucket : S3Bucket("gate-bucket")\n'
+        'cert   : ACMCertificate(domain_name: "gate.co")\n'
+        'cf     : CloudFrontDistribution(domain_name: "gate.co")\n'
+        "cert -> cf\n"
+        "cf -> bucket\n"
+    )
+
+    # phase 1: no certificate exists — the edge holds cf (and its edges) BLOCKED
+    state, blocked = load_giac(session, conn, src)
+    reasons = {b.g_id: b.reason for b in blocked}
+    assert set(reasons) == {"cf", "cert → cf", "cf → bucket"}
+    assert 'waiting on "cert" — not created yet (required by ACMCertificateCloudFrontEdge)' == reasons["cf"]
+
+    # the certificate gets requested and (moto, wait=0) ISSUED
+    arn = session.client("acm", region_name="us-east-1").request_certificate(
+        DomainName="gate.co", ValidationMethod="DNS"
+    )["CertificateArn"]
+
+    # phase 2: unblocked; run creates the distribution, pulling the cert
+    # ARN through the edge — no cert_arn anywhere in the source
+    state, blocked = load_giac(session, conn, src)
+    assert blocked == []
+    GraphIaC.run(state, blocked)
+
+    cf_client = session.client("cloudfront")
+    dists = cf_client.list_distributions()["DistributionList"]["Items"]
+    assert len(dists) == 1
+    config = cf_client.get_distribution_config(Id=dists[0]["Id"])["DistributionConfig"]
+    assert config["ViewerCertificate"]["ACMCertificateArn"] == arn
 
 
 def test_static_site_blocks_then_unblocks(aws):

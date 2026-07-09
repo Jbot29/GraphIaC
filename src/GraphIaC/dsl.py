@@ -733,8 +733,8 @@ def load_graph(state, graph, base_dir=None):
             raise FileNotFoundError(f'file("{fileref["path"]}") not found (looked in {base})')
         return target.read_text()
 
-    def resolve_ref(ref):
-        g_id, field = ref["g_id"], ref["field"]
+    def live_ready(g_id):
+        """The live state of a node, or _Blocked if it doesn't exist / isn't ready."""
         target = models.get(g_id)
         if target is None:
             raise _Blocked(f'waiting on "{g_id}" — {"blocked itself" if g_id in blocked_ids else "unknown node"}')
@@ -745,25 +745,51 @@ def load_graph(state, graph, base_dir=None):
             raise _Blocked(f'waiting on "{g_id}" — not created yet')
         if not live.ready():
             raise _Blocked(f'waiting on "{g_id}" — exists but not ready')
-        val = getattr(live, field, None)
+        return live
+
+    def resolve_ref(ref):
+        live = live_ready(ref["g_id"])
+        val = getattr(live, ref["field"], None)
         if val is None:
-            raise _Blocked(f'waiting on "{g_id}.{field}" — no value yet')
+            raise _Blocked(f'waiting on "{ref["g_id"]}.{ref["field"]}" — no value yet')
         return val
 
-    # nodes: fixpoint iteration so ref targets instantiate before referrers,
-    # regardless of declaration order
+    # edges whose class declares gates_destination: the destination cannot be
+    # provisioned until the source's live state is ready() — the
+    # relationship-shaped twin of an attribute reference
+    gated = {}  # dest g_id -> (source g_id, edge type)
+    for e in graph["edges"]:
+        cls = state.models_map.get(e["type"])
+        if not (cls and getattr(cls, "gates_destination", False)):
+            continue
+        try:
+            probe = cls(**{k: v for k, v in e["fields"].items() if isinstance(v, str)})
+            gated[probe.destination_g_id] = (probe.source_g_id, e["type"])
+        except Exception:
+            pass  # malformed edge — it will fail on its own below
+
+    # nodes: fixpoint iteration so ref/gate targets instantiate before their
+    # dependents, regardless of declaration order
     pending = {n["g_id"]: n for n in graph["nodes"]}
     while pending:
         progress = False
         for g_id, n in list(pending.items()):
             refs = _collect_refs(n["fields"], [])
+            gate = gated.get(g_id)
             if any(r["g_id"] in pending and r["g_id"] != g_id for r in refs):
                 continue  # a ref target hasn't been decided yet — come back to this one
+            if gate and gate[0] in pending and gate[0] != g_id:
+                continue  # the gating source hasn't been decided yet
             del pending[g_id]
             progress = True
             try:
                 if any(r["g_id"] == g_id for r in refs):
                     raise _Blocked(f'"{g_id}" references itself')
+                if gate:
+                    try:
+                        live_ready(gate[0])
+                    except _Blocked as b:
+                        raise _Blocked(f"{b.reason} (required by {gate[1]})") from None
                 fields = _substitute(n["fields"], resolve_ref, resolve_file)
                 model = state.models_map[n["type"]](g_id=g_id, **fields)
                 models[g_id] = model
@@ -771,9 +797,9 @@ def load_graph(state, graph, base_dir=None):
             except _Blocked as b:
                 blocked.append(BlockedItem(g_id=g_id, type=n["type"], reason=b.reason))
                 blocked_ids.add(g_id)
-        if not progress:  # only circular references remain
+        if not progress:  # only circular dependencies remain
             for g_id, n in pending.items():
-                blocked.append(BlockedItem(g_id=g_id, type=n["type"], reason="circular attribute references"))
+                blocked.append(BlockedItem(g_id=g_id, type=n["type"], reason="circular dependencies"))
                 blocked_ids.add(g_id)
             break
 

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import ClassVar, Optional
 
 from deepdiff import DeepDiff
 from pydantic import BaseModel
@@ -68,6 +68,14 @@ class BaseEdge(BaseModel):
     # destination_g_id: str
     # node_1_g_id: str
     # node_2_g_id: str
+
+    # An edge may declare that its DESTINATION cannot be provisioned until its
+    # SOURCE's live state is ready() — e.g. a CloudFront distribution needs its
+    # ACM certificate ISSUED before it can even be created. The DSL planner
+    # then marks the destination (and everything touching it) BLOCKED instead
+    # of letting create() fail against AWS. Data-shaped dependencies use
+    # attribute references instead; this flag is for relationship-shaped ones.
+    gates_destination: ClassVar[bool] = False
 
     @property
     def source_g_id(self):
