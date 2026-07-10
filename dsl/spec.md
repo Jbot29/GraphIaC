@@ -162,6 +162,7 @@ A bare node label used as a value (like `role` above) resolves to that node's
 | `CloudFrontFunction`   | `CloudFrontDistribution` | `CloudFrontFunctionEdge`    |
 | `ApiSite`              | `ApiEndpoint`          | `SiteEndpointEdge`            |
 | `CognitoUserPool`      | `CognitoUserPoolClient` | `CognitoPoolClientEdge`      |
+| `CognitoUserPoolClient` | `LambdaZipFile`       | `CognitoLambdaAuthEdge`       |
 | `ApiEndpoint`          | `LambdaZipFile`        | `EndpointLambdaEdge`          |
 | `IAMRole`              | `LambdaZipFile`        | `IAMRolePolicyLambdaEdge`     |
 | `LambdaZipFile`        | `DynamoTable`          | `LambdaDynamoEdge`            |

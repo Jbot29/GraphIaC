@@ -1,0 +1,57 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "users",
+        "type": "CognitoUserPool",
+        "fields": { "pool_name": "users" },
+        "line": 2
+      },
+      {
+        "g_id": "login",
+        "type": "CognitoUserPoolClient",
+        "fields": { "password_auth": true, "client_name": "login" },
+        "line": 3
+      },
+      {
+        "g_id": "role",
+        "type": "IAMRole",
+        "fields": { "name": "role" },
+        "line": 4
+      },
+      {
+        "g_id": "app",
+        "type": "LambdaZipFile",
+        "fields": {
+          "runtime": "python3.13",
+          "handler": "app.handler",
+          "zip_file_path": "./deployment.zip",
+          "public_url": true,
+          "name": "app"
+        },
+        "line": 5
+      }
+    ],
+    "edges": [
+      {
+        "type": "IAMRolePolicyLambdaEdge",
+        "fields": { "role_g_id": "role", "node_g_id": "app" },
+        "inferred": true,
+        "line": 8
+      },
+      {
+        "type": "CognitoPoolClientEdge",
+        "fields": { "pool_g_id": "users", "client_g_id": "login" },
+        "inferred": true,
+        "line": 9
+      },
+      {
+        "type": "CognitoLambdaAuthEdge",
+        "fields": { "client_g_id": "login", "fn_g_id": "app" },
+        "inferred": true,
+        "line": 10
+      }
+    ]
+  },
+  "errors": []
+}

@@ -106,7 +106,7 @@ Current node inventory by service:
 - **DynamoDB** (`dynamodb.py`): `DynamoTable`
 - **API Gateway** (`apigateway.py`): `ApiSite`, `ApiEndpoint`
 - **SES** (`ses.py`): `SESDomainIdentity`
-- **Cognito** (`cognito.py`): `CognitoUserPool`, `CognitoUserPoolClient` (metadata-only node; `CognitoPoolClientEdge` provisions the app client)
+- **Cognito** (`cognito.py`): `CognitoUserPool`, `CognitoUserPoolClient` (metadata-only node; `CognitoPoolClientEdge` provisions the app client; `CognitoLambdaAuthEdge` wires COGNITO_* env into a Lambda so its runtime can authenticate users — see `examples/lambda-ui/`)
 
 ### Two-Phase Pattern for Long-Running Resources
 

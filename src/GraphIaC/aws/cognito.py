@@ -161,6 +161,9 @@ class CognitoUserPoolClient(BaseNode):
     callback_urls: List[str] = []
     logout_urls: List[str] = []
     generate_secret: bool = False
+    # allow USER_PASSWORD_AUTH — needed when the app itself shows the login
+    # form and calls initiate_auth (e.g. a Lambda-hosted UI)
+    password_auth: bool = False
     client_id: Optional[str] = None
 
     @property
@@ -242,11 +245,14 @@ class CognitoPoolClientEdge(BaseEdge):
             return True
 
         idp = session.client("cognito-idp", region_name=pool.region)
+        auth_flows = ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
+        if client_node.password_auth:
+            auth_flows.append("ALLOW_USER_PASSWORD_AUTH")
         params = {
             "UserPoolId": pool.pool_id,
             "ClientName": client_node.client_name,
             "GenerateSecret": client_node.generate_secret,
-            "ExplicitAuthFlows": ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"],
+            "ExplicitAuthFlows": auth_flows,
             "PreventUserExistenceErrors": "ENABLED",
         }
         if client_node.callback_urls:
@@ -308,3 +314,117 @@ class CognitoPoolClientEdge(BaseEdge):
         except ClientError as e:
             results.append(VerifyResult(name="App client readable", passed=False, message=str(e)))
         return results
+
+
+class CognitoLambdaAuthEdge(BaseEdge):
+    """Wires Cognito auth into a Lambda (client -> fn): sets the
+    COGNITO_POOL_ID / COGNITO_CLIENT_ID / COGNITO_REGION environment
+    variables the function's runtime needs to log users in and validate
+    their sessions. The pool is discovered through the graph (the client's
+    CognitoPoolClientEdge), so the user declares only the arrow."""
+
+    client_g_id: str
+    fn_g_id: str
+
+    @property
+    def source_g_id(self):
+        return self.client_g_id
+
+    @property
+    def destination_g_id(self):
+        return self.fn_g_id
+
+    def _expected_env(self, session, G):
+        """The env vars this edge asserts, or None while pool/client aren't up."""
+        pool = None
+        for other in G.predecessors(self.client_g_id):
+            node = G.nodes[other]["data"]
+            if node.__class__.__name__ == "CognitoUserPool":
+                pool = _pool_from_graph(session, G, other)
+                break
+        if not pool or not pool.pool_id:
+            return None
+        client_node = G.nodes[self.client_g_id]["data"]
+        client_id = client_node.client_id
+        if not client_id:
+            idp = session.client("cognito-idp", region_name=pool.region)
+            paginator = idp.get_paginator("list_user_pool_clients")
+            for page in paginator.paginate(UserPoolId=pool.pool_id, MaxResults=60):
+                for c in page["UserPoolClients"]:
+                    if c["ClientName"] == client_node.client_name:
+                        client_id = c["ClientId"]
+        if not client_id:
+            return None
+        return {
+            "COGNITO_POOL_ID": pool.pool_id,
+            "COGNITO_CLIENT_ID": client_id,
+            "COGNITO_REGION": pool.region,
+        }
+
+    def read(self, session, G):
+        fn = G.nodes[self.fn_g_id]["data"]
+        try:
+            expected = self._expected_env(session, G)
+            if not expected:
+                return None
+            lc = session.client("lambda", region_name=fn.region)
+            cfg = lc.get_function_configuration(FunctionName=fn.name)
+            env = cfg.get("Environment", {}).get("Variables", {})
+            if all(env.get(k) == v for k, v in expected.items()):
+                return self
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ResourceNotFoundException":  # no lambda yet
+                logger.error(f"Error reading lambda auth env: {e}")
+        return None
+
+    def create(self, session, G):
+        fn = G.nodes[self.fn_g_id]["data"]
+        expected = self._expected_env(session, G)
+        if not expected:
+            logger.warning("Cognito pool/client not available yet; skipping lambda auth wiring")
+            return
+        lc = session.client("lambda", region_name=fn.region)
+        try:
+            lc.get_waiter("function_active_v2").wait(
+                FunctionName=fn.name, WaiterConfig={"Delay": 2, "MaxAttempts": 30}
+            )
+            cfg = lc.get_function_configuration(FunctionName=fn.name)
+            env = cfg.get("Environment", {}).get("Variables", {})
+            env.update(expected)  # merge — never clobber the function's own env
+            lc.get_waiter("function_updated_v2").wait(
+                FunctionName=fn.name, WaiterConfig={"Delay": 2, "MaxAttempts": 30}
+            )
+            lc.update_function_configuration(
+                FunctionName=fn.name, Environment={"Variables": env}
+            )
+            logger.info(f"Wired Cognito auth into {fn.name}: {expected['COGNITO_POOL_ID']}")
+            return True
+        except ClientError as e:
+            logger.error(f"Failed to wire Cognito auth into {fn.name}: {e}")
+            raise
+
+    def update(self, session, G):
+        return self.create(session, G)
+
+    def delete(self, session, G):
+        pass
+
+    def verify(self, session, G) -> list:
+        fn = G.nodes[self.fn_g_id]["data"]
+        try:
+            expected = self._expected_env(session, G)
+            if not expected:
+                return [VerifyResult(name="Cognito auth wiring", passed=False,
+                                     message="pool or app client not found")]
+            lc = session.client("lambda", region_name=fn.region)
+            cfg = lc.get_function_configuration(FunctionName=fn.name)
+            env = cfg.get("Environment", {}).get("Variables", {})
+            ok = all(env.get(k) == v for k, v in expected.items())
+            return [VerifyResult(
+                name="Cognito auth wiring",
+                passed=ok,
+                message="env matches pool/client" if ok
+                        else "lambda env does not match the connected pool/client",
+            )]
+        except ClientError as e:
+            return [VerifyResult(name="Cognito auth wiring", passed=False, message=str(e))]

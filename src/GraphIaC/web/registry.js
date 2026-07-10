@@ -108,6 +108,24 @@ return {
         "type": "CloudFrontDistribution"
       }
     },
+    "CognitoLambdaAuthEdge": {
+      "dest": {
+        "field": "fn_g_id",
+        "type": "LambdaZipFile"
+      },
+      "fields": {
+        "client_g_id": {
+          "required": true
+        },
+        "fn_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "client_g_id",
+        "type": "CognitoUserPoolClient"
+      }
+    },
     "CognitoPoolClientEdge": {
       "dest": {
         "field": "client_g_id",
@@ -443,6 +461,10 @@ return {
         "logout_urls": {
           "default": [],
           "required": false
+        },
+        "password_auth": {
+          "default": false,
+          "required": false
         }
       },
       "nameField": "client_name"
@@ -530,6 +552,10 @@ return {
         "name": {
           "required": true
         },
+        "public_url": {
+          "default": false,
+          "required": false
+        },
         "publish": {
           "default": true,
           "required": false
@@ -543,6 +569,10 @@ return {
         },
         "timeout": {
           "default": 15,
+          "required": false
+        },
+        "url": {
+          "default": null,
           "required": false
         },
         "zip_file_path": {

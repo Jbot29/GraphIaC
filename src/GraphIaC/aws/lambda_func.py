@@ -74,6 +74,11 @@ class LambdaZipFile(BaseNode):
     timeout: Optional[int] = 15
     memory_size: Optional[int] = 128
     publish: Optional[bool] = True
+    # public_url=True manages a Lambda function URL (AuthType NONE + public
+    # invoke permission — put auth inside the function, e.g. via
+    # CognitoLambdaAuthEdge). False leaves any existing URL alone.
+    public_url: bool = False
+    url: Optional[str] = None
 
     @property
     def read_id(self) -> Optional[str]:
@@ -96,7 +101,7 @@ class LambdaZipFile(BaseNode):
 
         iam_role = G.nodes[role_edge.role_g_id]["data"]
 
-        return lambda_create(
+        result = lambda_create(
             session,
             self.name,
             self.runtime,
@@ -109,6 +114,9 @@ class LambdaZipFile(BaseNode):
             self.zip_file_path,
             self.region,
         )
+        if self.public_url:
+            self.url = ensure_function_url(session, self.name, self.region)
+        return result
 
     def read(self, session, G, g_id, read_id):
         # cloned = self.copy(deep=True)
@@ -126,12 +134,17 @@ class LambdaZipFile(BaseNode):
             timeout=response.get("Timeout"),
             memory_size=response.get("MemorySize"),
             publish=self.publish,  # AWS doesn't store this boolean
+            public_url=self.public_url,  # managed only when True (no drift signal)
+            url=read_function_url(session, self.name, self.region),
         )
 
         return current_config
 
     def update(self, session, G):
-        return lambda_update(session, self, self.region)
+        result = lambda_update(session, self, self.region)
+        if self.public_url:
+            self.url = ensure_function_url(session, self.name, self.region)
+        return result
 
     def delete(self, session, G):
         pass
@@ -185,6 +198,37 @@ def lambda_create(
         MemorySize=memory_size,
         Publish=publish,
     )
+
+
+def ensure_function_url(session, function_name, region):
+    """A public function URL (AuthType NONE) + the invoke permission that
+    makes it reachable. Idempotent."""
+    lc = session.client("lambda", region_name=region)
+    try:
+        resp = lc.get_function_url_config(FunctionName=function_name)
+    except lc.exceptions.ResourceNotFoundException:
+        resp = lc.create_function_url_config(FunctionName=function_name, AuthType="NONE")
+        logger.info(f"Created function URL for {function_name}: {resp['FunctionUrl']}")
+    try:
+        lc.add_permission(
+            FunctionName=function_name,
+            StatementId="FunctionURLAllowPublicAccess",
+            Action="lambda:InvokeFunctionUrl",
+            Principal="*",
+            FunctionUrlAuthType="NONE",
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ResourceConflictException":  # already granted
+            raise
+    return resp["FunctionUrl"]
+
+
+def read_function_url(session, function_name, region):
+    lc = session.client("lambda", region_name=region)
+    try:
+        return lc.get_function_url_config(FunctionName=function_name)["FunctionUrl"]
+    except lc.exceptions.ResourceNotFoundException:
+        return None
 
 
 def lambda_read(session, func_name, region):
