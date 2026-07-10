@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Optional
 
 from botocore.exceptions import ClientError
@@ -207,19 +208,35 @@ def lambda_create(
     with open(zip_file_name, "rb") as f:
         zip_bytes = f.read()
 
-    print(len(zip_bytes))
-    print(f"Creating Lambda function '{function_name}'...")
-    lambda_client.create_function(
-        FunctionName=function_name,
-        Runtime=runtime,
-        Role=role_arn,  # The ARN of the IAM role
-        Handler=handler,
-        Code={"ZipFile": zip_bytes},
-        Description=description,
-        Timeout=timeout,
-        MemorySize=memory_size,
-        Publish=publish,
-    )
+    logger.info(f"Creating Lambda function '{function_name}' ({len(zip_bytes)} bytes)...")
+
+    # A just-created IAM role can take tens of seconds to propagate to the
+    # Lambda service — get_role succeeding does NOT mean Lambda can assume
+    # it yet. Retry the specific "cannot be assumed" rejection.
+    deadline = time.time() + 90
+    while True:
+        try:
+            lambda_client.create_function(
+                FunctionName=function_name,
+                Runtime=runtime,
+                Role=role_arn,  # The ARN of the IAM role
+                Handler=handler,
+                Code={"ZipFile": zip_bytes},
+                Description=description,
+                Timeout=timeout,
+                MemorySize=memory_size,
+                Publish=publish,
+            )
+            return
+        except ClientError as e:
+            retriable = (
+                e.response["Error"]["Code"] == "InvalidParameterValueException"
+                and "cannot be assumed" in e.response["Error"].get("Message", "")
+            )
+            if not retriable or time.time() >= deadline:
+                raise
+            logger.info("  waiting for the IAM role to propagate to Lambda...")
+            time.sleep(3)
 
 
 def ensure_function_url(session, function_name, region):

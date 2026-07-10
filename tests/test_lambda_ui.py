@@ -208,3 +208,50 @@ def test_miniui_full_session(miniui_app):
     resp = app.handler(event("/logout", cookies=[cookie]), None)
     assert resp["statusCode"] == 303
     assert "Max-Age=0" in resp["cookies"][0]
+
+
+def test_create_function_retries_role_propagation(aws, zip_path, monkeypatch):
+    """IAM roles take time to propagate to Lambda; the 'cannot be assumed'
+    rejection must be retried, not fatal."""
+    from botocore.exceptions import ClientError
+
+    from GraphIaC.aws import lambda_func
+
+    iam = aws.client("iam")
+    role_arn = iam.create_role(
+        RoleName="prop-role",
+        AssumeRolePolicyDocument='{"Version":"2012-10-17","Statement":[{"Effect":"Allow",'
+        '"Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}',
+    )["Role"]["Arn"]
+
+    class FlakyLambda:
+        def __init__(self, real):
+            self.real, self.failures = real, 2
+
+        def create_function(self, **kw):
+            if self.failures:
+                self.failures -= 1
+                raise ClientError(
+                    {"Error": {"Code": "InvalidParameterValueException",
+                               "Message": "The role defined for the function cannot be assumed by Lambda."}},
+                    "CreateFunction",
+                )
+            return self.real.create_function(**kw)
+
+        def __getattr__(self, name):
+            return getattr(self.real, name)
+
+    class FlakySession:
+        def __init__(self, real):
+            self.real = real
+            self.flaky = FlakyLambda(real.client("lambda", region_name=REGION))
+
+        def client(self, service, **kw):
+            return self.flaky if service == "lambda" else self.real.client(service, **kw)
+
+    monkeypatch.setattr(lambda_func.time, "sleep", lambda s: None)
+    session = FlakySession(aws)
+    lambda_func.lambda_create(session, "prop-fn", "python3.13", role_arn, "app.handler",
+                              "d", 15, 128, True, zip_path, REGION)
+    assert session.flaky.failures == 0  # both flakes consumed, then success
+    assert aws.client("lambda", region_name=REGION).get_function(FunctionName="prop-fn")
