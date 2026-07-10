@@ -1,0 +1,62 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "hz",
+        "type": "HostedZone",
+        "fields": { "domain_name": "x.co" },
+        "line": 5
+      },
+      {
+        "g_id": "cert",
+        "type": "ACMCertificate",
+        "fields": { "domain_name": "x.co" },
+        "line": 6
+      },
+      {
+        "g_id": "bucket",
+        "type": "S3Bucket",
+        "fields": { "bucket_name": "x-co-site" },
+        "line": 7
+      },
+      {
+        "g_id": "cf",
+        "type": "CloudFrontDistribution",
+        "fields": { "domain_name": "x.co" },
+        "line": 8
+      }
+    ],
+    "edges": [
+      {
+        "type": "ACMCertificateHostedZoneEdge",
+        "fields": { "cert_g_id": "cert", "hz_g_id": "hz" },
+        "inferred": true,
+        "line": 10
+      },
+      {
+        "type": "ACMCertificateCloudFrontEdge",
+        "fields": { "cert_g_id": "cert", "cf_g_id": "cf" },
+        "inferred": true,
+        "line": 11
+      },
+      {
+        "type": "CloudFrontS3OACEdge",
+        "fields": { "cf_g_id": "cf", "s3_g_id": "bucket" },
+        "inferred": true,
+        "line": 12
+      },
+      {
+        "type": "CloudFrontRoute53Edge",
+        "fields": { "cf_g_id": "cf", "hz_g_id": "hz", "domain_name": "x.co" },
+        "inferred": true,
+        "line": 13
+      }
+    ],
+    "guards": [
+      { "predicate": "private", "args": ["bucket"], "line": 15 },
+      { "predicate": "https-only", "args": ["cf"], "line": 16 },
+      { "predicate": "locked-to", "args": ["bucket", "cf"], "line": 17 }
+    ]
+  },
+  "errors": []
+}

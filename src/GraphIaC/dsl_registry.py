@@ -122,7 +122,10 @@ def build_registry():
     for edge_name in EDGE_ENDPOINTS:
         if edge_name not in edges:
             logger.warning(f"EDGE_ENDPOINTS entry {edge_name} is not in BASE_MODEL_MAP")
-    return {"version": VERSION, "nodes": nodes, "edges": edges}
+
+    from GraphIaC.guards import registry_entry
+
+    return {"version": VERSION, "nodes": nodes, "edges": edges, "predicates": registry_entry()}
 
 
 def write_registry_js(path=REGISTRY_JS_PATH):

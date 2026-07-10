@@ -242,20 +242,21 @@ function parse(src, registry) {
   const errors = [], warnings = [];
   const err = (ln, msg) => errors.push({ line: ln, msg });
   const warn = (ln, msg) => warnings.push({ line: ln, msg });
-  const graph = { nodes: [], edges: [] };
+  const graph = { nodes: [], edges: [], guards: [] };
   if (!registry || !registry.nodes || !registry.edges) {
     err(0, "no type registry given — load registry.js and pass it to parse(src, registry)");
     return { graph, errors, warnings };
   }
 
   // ---- classify statements ----
-  const constStmts = [], nodeStmts = [], edgeStmts = [];
+  const constStmts = [], nodeStmts = [], edgeStmts = [], guardStmts = [];
   for (const st of toStatements(src)) {
     if (st.unclosed) { err(st.ln, "unclosed ( [ or { — statement never ends"); continue; }
-    if (indexTopLevel(st.text, "->") >= 0) edgeStmts.push(st);
+    if (st.text.startsWith("?")) guardStmts.push(st);
+    else if (indexTopLevel(st.text, "->") >= 0) edgeStmts.push(st);
     else if (indexTopLevel(st.text, "=") >= 0) constStmts.push(st);
     else if (indexTopLevel(st.text, ":") >= 0) nodeStmts.push(st);
-    else err(st.ln, `unrecognized statement (expected name = value, label : Type, or a -> b): "${clip(st.text)}"`);
+    else err(st.ln, `unrecognized statement (expected name = value, label : Type, a -> b, or ? predicate(...)): "${clip(st.text)}"`);
   }
 
   // ---- constants (parse-time only; may use earlier constants) ----
@@ -432,6 +433,32 @@ function parse(src, registry) {
     graph.edges.push({ type, fields, inferred: !explicitType, line: st.ln });
   }
 
+  // ---- guards: ? predicate(label, ...) ----
+  const predicates = registry.predicates || {};
+  const guardRe = /^\?\s*([A-Za-z_][A-Za-z0-9_-]*)\s*\(([^)]*)\)\s*$/;
+  for (const st of guardStmts) {
+    const m = st.text.match(guardRe);
+    if (!m) { err(st.ln, "? needs a predicate — e.g. ? private(bucket)"); continue; }
+    const [, name, argStr] = m;
+    const spec = predicates[name];
+    if (!spec) { err(st.ln, `unknown predicate "${name}"`); continue; }
+    const args = argStr.trim() ? argStr.split(",").map((a) => a.trim()) : [];
+    const expected = spec.args;
+    if (args.length !== expected.length) {
+      err(st.ln, `${name} takes ${expected.length} argument${expected.length !== 1 ? "s" : ""} (${expected.join(", ")}), got ${args.length}`);
+      continue;
+    }
+    let ok = true;
+    args.forEach((label, i) => {
+      if (!nodes.has(label)) { err(st.ln, `unknown node "${label}" in guard`); ok = false; }
+      else if (nodes.get(label).type !== expected[i]) {
+        err(st.ln, `${name} expects ${expected[i]} for argument ${i + 1}, got ${nodes.get(label).type} ("${label}")`);
+        ok = false;
+      }
+    });
+    if (ok) graph.guards.push({ predicate: name, args, line: st.ln });
+  }
+
   return { graph, errors, warnings };
 }
 
@@ -476,6 +503,10 @@ function desugar(graph, registry) {
     const src = e.fields[reg.source.field], dst = e.fields[reg.dest.field];
     const extras = fmtFields(e.fields, new Set([reg.source.field, reg.dest.field]));
     out.push(`${src} -> ${dst} : ${e.type}${extras ? `(${extras})` : ""}`);
+  }
+  if ((graph.guards || []).length) out.push("");
+  for (const g of graph.guards || []) {
+    out.push(`? ${g.predicate}(${g.args.join(", ")})`);
   }
   return out.join("\n");
 }

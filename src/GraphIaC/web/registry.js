@@ -683,6 +683,39 @@ return {
       "nameField": null
     }
   },
+  "predicates": {
+    "admin-only-signup": {
+      "args": [
+        "CognitoUserPool"
+      ],
+      "doc": "nobody can sign themselves up"
+    },
+    "authed": {
+      "args": [
+        "LambdaZipFile"
+      ],
+      "doc": "if the function has a public URL, Cognito auth is wired into it"
+    },
+    "https-only": {
+      "args": [
+        "CloudFrontDistribution"
+      ],
+      "doc": "viewers are forced to HTTPS with modern TLS"
+    },
+    "locked-to": {
+      "args": [
+        "S3Bucket",
+        "CloudFrontDistribution"
+      ],
+      "doc": "only that distribution can read the bucket"
+    },
+    "private": {
+      "args": [
+        "S3Bucket"
+      ],
+      "doc": "the bucket blocks all public access and its policy grants none"
+    }
+  },
   "version": "0.1"
 };
 });

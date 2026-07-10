@@ -39,3 +39,8 @@ cert -> cf                            # viewer certificate (gates cf until ISSUE
 cf   -> bucket                        # OAC: only this distribution can read
 cf   -> hz : (domain_name: domain)    # A alias record for the domain
 pretty-urls -> cf                     # rewrite on every viewer request
+
+# --- declared invariants: independent checks, never the provisioning code ---
+? private(bucket)          # the bucket must never be publicly readable
+? https-only(cf)           # viewers forced to HTTPS, modern TLS
+? locked-to(bucket, cf)    # only this distribution can read the bucket

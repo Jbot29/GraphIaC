@@ -112,21 +112,34 @@ class Api:
         finally:
             self.lock.release()
 
+    def _guards(self, source):
+        """Evaluate the source's ? guards; [] when none or unparseable."""
+        from GraphIaC import guards
+
+        res = dsl.parse(source)
+        if res["errors"] or not res["graph"]["guards"]:
+            return []
+        return [g.model_dump() for g in guards.evaluate(self.session, res["graph"])]
+
     def post_plan(self, body):
         return self._engine(
             body, lambda state, blocked: (200, {"ops": [_op_json(o) for o in GraphIaC.plan(state, blocked)]})
         )
 
     def post_run(self, body):
-        return self._engine(
-            body, lambda state, blocked: (200, {"applied": [_op_json(o) for o in GraphIaC.run(state, blocked)]})
-        )
+        def go(state, blocked):
+            applied = [_op_json(o) for o in GraphIaC.run(state, blocked)]
+            return 200, {"applied": applied, "guards": self._guards(body["source"])}
+
+        return self._engine(body, go)
 
     def post_verify(self, body):
         def go(state, blocked):
             checks = []
             failed = GraphIaC.verify(state, collected=checks)
-            return 200, {"checks": checks, "failed": failed}
+            results = self._guards(body["source"])
+            failed += sum(1 for r in results if r["status"] == "fail")
+            return 200, {"checks": checks, "failed": failed, "guards": results}
 
         return self._engine(body, go)
 

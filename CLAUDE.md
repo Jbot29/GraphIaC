@@ -150,6 +150,10 @@ Run the DSL tests: `pytest tests/test_dsl.py tests/test_dsl_load.py` and `node -
 
 Shared `colorlog` setup. Call `setup_logger()` in new modules rather than calling `logging` directly.
 
+### Guards (`src/GraphIaC/guards.py`)
+
+`? predicate(label, ...)` statements in `.giac` files declare safety invariants (`? private(bucket)`). **Independence rule: predicates are raw boto3 only — never call node/edge class code.** Signatures in `PREDICATES` flow into the generated registry so both parsers validate at parse time. `verify` counts guard failures (exit 1); `run` reports them after applying but never blocks (warn-only by design; `--strict` is future). Pass/fail/pending states — pending = target not created yet. New predicates: add to `PREDICATES` + `_CHECKS`, regenerate the registry, cover pass/fail/pending in `tests/test_guards.py`.
+
 ### Deploy Policy Generation (`src/GraphIaC/deploy_policy.py`)
 
 Every node/edge class declares `deploy_actions` (ClassVar) — the IAM actions its read/create/update/delete/verify calls need. `python -m GraphIaC <profile> --infra_file site.giac policy` generates the minimal deploy policy for that file (`policy --all` for the full catalog). `DeployRole` (`aws/deploy_role.py`, used by `examples/get-started/setup.giac`) is the self-describing bootstrap: an IAM role whose inline policy is the full catalog, re-synced on `update`, audited by `verify`. Actions-first (Resource "*"); resource-level scoping is future work.
