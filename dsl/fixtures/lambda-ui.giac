@@ -1,0 +1,10 @@
+# one lambda, public URL, cognito login — the serverless-tool base
+users : CognitoUserPool
+login : CognitoUserPoolClient(password_auth: true)
+role  : IAMRole
+app   : LambdaZipFile(runtime: "python3.13", handler: "app.handler",
+                      zip_file_path: "./deployment.zip", public_url: true)
+
+role  -> app
+users -> login
+login -> app

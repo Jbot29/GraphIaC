@@ -31,6 +31,8 @@ VERSION = "0.1"
 
 # node type -> the field the label defaults into (see dsl/spec.md "Name defaulting")
 NAME_FIELDS = {
+    "CognitoUserPool": "pool_name",
+    "CognitoUserPoolClient": "client_name",
     "S3Bucket": "bucket_name",
     "DynamoTable": "table_name",
     "IAMRole": "name",
@@ -45,6 +47,8 @@ NAME_FIELDS = {
 # This is the `a -> b` inference table: one edge per unordered node-type pair.
 EDGE_ENDPOINTS = {
     "ACMCertificateHostedZoneEdge": ("ACMCertificate", "cert_g_id", "HostedZone", "hz_g_id"),
+    "CognitoPoolClientEdge": ("CognitoUserPool", "pool_g_id", "CognitoUserPoolClient", "client_g_id"),
+    "CognitoLambdaAuthEdge": ("CognitoUserPoolClient", "client_g_id", "LambdaZipFile", "fn_g_id"),
     "ACMCertificateCloudFrontEdge": ("ACMCertificate", "cert_g_id", "CloudFrontDistribution", "cf_g_id"),
     "CloudFrontS3OACEdge": ("CloudFrontDistribution", "cf_g_id", "S3Bucket", "s3_g_id"),
     "CloudFrontRoute53Edge": ("CloudFrontDistribution", "cf_g_id", "HostedZone", "hz_g_id"),

@@ -161,6 +161,8 @@ A bare node label used as a value (like `role` above) resolves to that node's
 | `CloudFrontDistribution` | `HostedZone`         | `CloudFrontRoute53Edge`       |
 | `CloudFrontFunction`   | `CloudFrontDistribution` | `CloudFrontFunctionEdge`    |
 | `ApiSite`              | `ApiEndpoint`          | `SiteEndpointEdge`            |
+| `CognitoUserPool`      | `CognitoUserPoolClient` | `CognitoPoolClientEdge`      |
+| `CognitoUserPoolClient` | `LambdaZipFile`       | `CognitoLambdaAuthEdge`       |
 | `ApiEndpoint`          | `LambdaZipFile`        | `EndpointLambdaEdge`          |
 | `IAMRole`              | `LambdaZipFile`        | `IAMRolePolicyLambdaEdge`     |
 | `LambdaZipFile`        | `DynamoTable`          | `LambdaDynamoEdge`            |
@@ -361,6 +363,12 @@ otherwise write by hand.
 - **Guard blocks** (`when cert.status == "ISSUED" { … }`) — declarative
   conditionals. Deferred to see whether `BLOCKED` + attribute references
   cover every real case; so far they do.
+- **Graceful mid-run failure** — the third tier of time-handling (after
+  inline retries for transient errors and BLOCKED for planned waits): an
+  operation failing mid-run should mark itself and its downstream as
+  unfinished-re-run, keep applying independent operations, and summarize —
+  not abort the whole run (the Pulumi failure mode). Engine semantics, not
+  language surface; may make `when` permanently unnecessary.
 - **Queries / guards (`?`)** — verification in the language: Prolog-style
   statements declaring safety invariants as facts the source must satisfy
   (`? private(bucket)`, or a guard trailing the statement it protects).

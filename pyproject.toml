@@ -1,6 +1,6 @@
 [project]
 name = "GraphIaC"
-version = "0.0.19"
+version = "0.0.23"
 authors = [
   { name="Jeremy Schwartz", email="jerschwartz@gmail.com" },
 ]

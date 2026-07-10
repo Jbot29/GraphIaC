@@ -6,8 +6,26 @@ from botocore.exceptions import ClientError
 
 from GraphIaC.models import BaseEdge, BaseNode
 
-from .iam_policy import IamPolicyDocument, IamTrustPolicyDocument
+from ..logs import setup_logger
+from .iam_policy import (
+    IamPolicyDocument,
+    IamTrustPolicyDocument,
+    IamTrustPolicyStatement,
+)
 from .types import AwsName
+
+logger = setup_logger()
+
+LAMBDA_TRUST_POLICY = IamTrustPolicyDocument(
+    Statement=[
+        IamTrustPolicyStatement(
+            Sid="GraphIaCTrustLambda",
+            Effect="Allow",
+            Principal={"Service": "lambda.amazonaws.com"},
+            Action="sts:AssumeRole",
+        )
+    ]
+)
 
 """
 IAM Role
@@ -43,7 +61,11 @@ class IAMRole(BaseNode):
         return False
 
     def create(self, session, G):
-        role_arn = role_create(session, self.name, self.trust_policy)
+        # IAM requires a trust policy at creation. Roles in GraphIaC are
+        # (so far) always execution roles for Lambda, so that's the default;
+        # pass trust_policy explicitly for anything else.
+        doc = self.trust_policy or LAMBDA_TRUST_POLICY
+        role_arn = role_create(session, self.name, doc)
 
         if not role_arn:
             return False
@@ -122,7 +144,6 @@ def role_exists(session, role_name):
     try:
         # Check if the role already exists
         iam_client.get_role(RoleName=role_name)
-        print(f"Role '{role_name}' already exists.")
     except iam_client.exceptions.NoSuchEntityException:
         return False
 
@@ -131,6 +152,9 @@ def role_exists(session, role_name):
 
 def role_create(session, role_name, policy_document, wait=True, max_wait_seconds=30):
     iam_client = session.client("iam")
+
+    if isinstance(policy_document, IamTrustPolicyDocument):
+        policy_document = policy_document.model_dump(exclude_none=True)
 
     create_role_response = iam_client.create_role(
         RoleName=role_name,
@@ -181,8 +205,8 @@ def role_read(session, role_name):
         return role_arn, policies
 
     except ClientError as e:
-        # Handle error if role doesn't exist or if there's an issue
-        print(f"Error: {e}")
+        if e.response["Error"]["Code"] != "NoSuchEntity":  # not-created-yet is normal
+            logger.error(f"Error reading role {role_name}: {e}")
         return None, None
 
 

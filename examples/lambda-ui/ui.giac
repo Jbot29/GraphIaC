@@ -1,0 +1,35 @@
+# A serverless web app with login — one Lambda, no servers, no S3:
+#
+#   https://<generated>.lambda-url.<region>.on.aws
+#     -> login page (Cognito: admin-created users only)
+#     -> your UI (html/js/assets baked into the zip)
+#     -> authenticated JSON APIs (add a python function, get an endpoint)
+#
+# This is a base for real internal tools: a feature-flag console, a CRM
+# helper, an admin panel. Edit lambda/app.py, rebuild, run — done.
+#
+#   ./build.sh
+#   python -m GraphIaC <aws-profile> --infra_file ui.giac run
+#
+# The function URL is printed on create (and lands in the state DB). Make
+# yourself a user — note --user-pool-id takes the pool ID (us-east-2_XXXX,
+# printed on create), not the pool name — and set a PERMANENT password
+# (a temporary one puts the user in a challenge state miniui's simple
+# login doesn't handle; 12+ chars, upper/lower/number per the pool policy):
+#
+#   aws cognito-idp admin-create-user --user-pool-id <pool_id> \
+#       --username you@example.com --message-action SUPPRESS --profile <aws-profile>
+#   aws cognito-idp admin-set-user-password --user-pool-id <pool_id> \
+#       --username you@example.com --password '<12+ chars>' --permanent \
+#       --profile <aws-profile>
+
+mini-ui-users : CognitoUserPool(region: "us-east-2")
+mini-ui-login : CognitoUserPoolClient(password_auth: true)
+mini-ui-role  : IAMRole
+mini-ui       : LambdaZipFile(runtime: "python3.13", handler: "app.handler",
+                              zip_file_path: "./deployment.zip", public_url: true,
+                              region: "us-east-2")
+
+mini-ui-role  -> mini-ui           # basic execution policy
+mini-ui-users -> mini-ui-login     # app client on the pool (password auth)
+mini-ui-login -> mini-ui           # COGNITO_* env wired into the lambda

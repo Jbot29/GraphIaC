@@ -108,6 +108,42 @@ return {
         "type": "CloudFrontDistribution"
       }
     },
+    "CognitoLambdaAuthEdge": {
+      "dest": {
+        "field": "fn_g_id",
+        "type": "LambdaZipFile"
+      },
+      "fields": {
+        "client_g_id": {
+          "required": true
+        },
+        "fn_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "client_g_id",
+        "type": "CognitoUserPoolClient"
+      }
+    },
+    "CognitoPoolClientEdge": {
+      "dest": {
+        "field": "client_g_id",
+        "type": "CognitoUserPoolClient"
+      },
+      "fields": {
+        "client_g_id": {
+          "required": true
+        },
+        "pool_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "pool_g_id",
+        "type": "CognitoUserPool"
+      }
+    },
     "EndpointLambdaEdge": {
       "dest": {
         "field": "lambda_node_g_id",
@@ -377,6 +413,62 @@ return {
       },
       "nameField": "name"
     },
+    "CognitoUserPool": {
+      "fields": {
+        "admin_only_signup": {
+          "default": true,
+          "required": false
+        },
+        "arn": {
+          "default": null,
+          "required": false
+        },
+        "password_min_length": {
+          "default": 12,
+          "required": false
+        },
+        "pool_id": {
+          "default": null,
+          "required": false
+        },
+        "pool_name": {
+          "required": true
+        },
+        "region": {
+          "default": "us-east-2",
+          "required": false
+        }
+      },
+      "nameField": "pool_name"
+    },
+    "CognitoUserPoolClient": {
+      "fields": {
+        "callback_urls": {
+          "default": [],
+          "required": false
+        },
+        "client_id": {
+          "default": null,
+          "required": false
+        },
+        "client_name": {
+          "required": true
+        },
+        "generate_secret": {
+          "default": false,
+          "required": false
+        },
+        "logout_urls": {
+          "default": [],
+          "required": false
+        },
+        "password_auth": {
+          "default": false,
+          "required": false
+        }
+      },
+      "nameField": "client_name"
+    },
     "DynamoTable": {
       "fields": {
         "billing_mode": {
@@ -460,6 +552,10 @@ return {
         "name": {
           "required": true
         },
+        "public_url": {
+          "default": false,
+          "required": false
+        },
         "publish": {
           "default": true,
           "required": false
@@ -473,6 +569,10 @@ return {
         },
         "timeout": {
           "default": 15,
+          "required": false
+        },
+        "url": {
+          "default": null,
           "required": false
         },
         "zip_file_path": {

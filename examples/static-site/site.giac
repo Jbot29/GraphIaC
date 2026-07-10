@@ -1,0 +1,41 @@
+# A complete static website, from one file:
+#
+#   https://<your-domain>  ->  CloudFront (HTTPS, HTTP/2, compressed)
+#                          ->  private S3 bucket (only CloudFront can read)
+#   + ACM certificate, DNS-validated automatically
+#   + pretty URLs (/about -> /about/index.html) via a CloudFront function
+#
+# Setup: change the two names below. The hosted zone for your domain must
+# already exist in Route53 (it's imported, not created).
+#
+#   python -m GraphIaC <aws-profile> --infra_file site.giac run
+#
+# The first run requests the certificate and adds its DNS validation
+# records; everything downstream shows ⊘ BLOCKED — that's expected.
+# Once ACM issues the cert (minutes to hours), run again and the
+# distribution, bucket policy, and DNS alias come up.
+#
+# Then publish the site:
+#
+#   aws s3 cp index.html s3://<your-bucket-name>/ --profile <aws-profile>
+#
+# and audit it any time:
+#
+#   python -m GraphIaC <aws-profile> --infra_file site.giac verify
+
+domain = "example.com"          # your domain (hosted zone must exist)
+site-bucket = "example-com-site"  # bucket names are globally unique
+
+hz     : HostedZone(domain_name: domain)
+cert   : ACMCertificate(domain_name: domain)
+bucket : S3Bucket(bucket_name: site-bucket)
+cf     : CloudFrontDistribution(domain_name: domain)
+
+pretty-urls : CloudFrontFunction(comment: "Rewrite pretty URLs to index.html",
+                                 function_code: file("url-rewrite.js"))
+
+cert -> hz                            # DNS validation records, automatically
+cert -> cf                            # viewer certificate (gates cf until ISSUED)
+cf   -> bucket                        # OAC: only this distribution can read
+cf   -> hz : (domain_name: domain)    # A alias record for the domain
+pretty-urls -> cf                     # rewrite on every viewer request

@@ -1,0 +1,5 @@
+# auth for a self-hosted UI: a locked-down user pool + an app client
+users : CognitoUserPool(region: "us-east-2")
+ui    : CognitoUserPoolClient(callback_urls: ["https://ui.example.com/callback"])
+
+users -> ui       # app client provisioned on the pool

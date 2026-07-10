@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Optional
 
 from botocore.exceptions import ClientError
@@ -6,11 +7,28 @@ from pydantic import Field
 
 from ..logs import setup_logger
 from ..models import BaseNode
-from .iam_policy import IamTrustPolicyStatement
+from .iam_policy import (
+    IamTrustPolicyStatement,
+    get_trust_policy_for_role,
+    upsert_trust_statement_for_role,
+)
 from .iam_role import IAMRolePolicyEdge, attach_role_policy
 from .types import AwsName
 
 logger = setup_logger()
+
+
+def _lambda_trusted(doc):
+    """Does any statement already let lambda.amazonaws.com assume the role?"""
+    for s in doc.Statement:
+        if s.Effect != "Allow":
+            continue
+        svc = s.Principal.get("Service")
+        services = [svc] if isinstance(svc, str) else (svc or [])
+        actions = [s.Action] if isinstance(s.Action, str) else s.Action
+        if "lambda.amazonaws.com" in services and "sts:AssumeRole" in actions:
+            return True
+    return False
 
 # TODO: Zipfile compare sha
 
@@ -53,7 +71,12 @@ class IAMRolePolicyLambdaEdge(IAMRolePolicyEdge):
     def create(self, session, G):
         role_name = G.nodes[self.role_g_id]["data"].read_id
         attach_role_policy(session, role_name, self.policy_arn)
-        # add the trust relationship
+
+        # an imported role may not trust Lambda yet — assert it (roles
+        # GraphIaC creates already have it, so this is usually a no-op)
+        if not _lambda_trusted(get_trust_policy_for_role(session, role_name)):
+            upsert_trust_statement_for_role(session, role_name, stmt)
+            logger.info(f"Added Lambda trust to role {role_name}")
 
         return True
 
@@ -74,6 +97,11 @@ class LambdaZipFile(BaseNode):
     timeout: Optional[int] = 15
     memory_size: Optional[int] = 128
     publish: Optional[bool] = True
+    # public_url=True manages a Lambda function URL (AuthType NONE + public
+    # invoke permission — put auth inside the function, e.g. via
+    # CognitoLambdaAuthEdge). False leaves any existing URL alone.
+    public_url: bool = False
+    url: Optional[str] = None
 
     @property
     def read_id(self) -> Optional[str]:
@@ -96,7 +124,7 @@ class LambdaZipFile(BaseNode):
 
         iam_role = G.nodes[role_edge.role_g_id]["data"]
 
-        return lambda_create(
+        result = lambda_create(
             session,
             self.name,
             self.runtime,
@@ -109,6 +137,9 @@ class LambdaZipFile(BaseNode):
             self.zip_file_path,
             self.region,
         )
+        if self.public_url:
+            self.url = ensure_function_url(session, self.name, self.region)
+        return result
 
     def read(self, session, G, g_id, read_id):
         # cloned = self.copy(deep=True)
@@ -126,12 +157,17 @@ class LambdaZipFile(BaseNode):
             timeout=response.get("Timeout"),
             memory_size=response.get("MemorySize"),
             publish=self.publish,  # AWS doesn't store this boolean
+            public_url=self.public_url,  # managed only when True (no drift signal)
+            url=read_function_url(session, self.name, self.region),
         )
 
         return current_config
 
     def update(self, session, G):
-        return lambda_update(session, self, self.region)
+        result = lambda_update(session, self, self.region)
+        if self.public_url:
+            self.url = ensure_function_url(session, self.name, self.region)
+        return result
 
     def delete(self, session, G):
         pass
@@ -172,19 +208,81 @@ def lambda_create(
     with open(zip_file_name, "rb") as f:
         zip_bytes = f.read()
 
-    print(len(zip_bytes))
-    print(f"Creating Lambda function '{function_name}'...")
-    lambda_client.create_function(
-        FunctionName=function_name,
-        Runtime=runtime,
-        Role=role_arn,  # The ARN of the IAM role
-        Handler=handler,
-        Code={"ZipFile": zip_bytes},
-        Description=description,
-        Timeout=timeout,
-        MemorySize=memory_size,
-        Publish=publish,
-    )
+    logger.info(f"Creating Lambda function '{function_name}' ({len(zip_bytes)} bytes)...")
+
+    # A just-created IAM role can take tens of seconds to propagate to the
+    # Lambda service — get_role succeeding does NOT mean Lambda can assume
+    # it yet. Retry the specific "cannot be assumed" rejection.
+    deadline = time.time() + 90
+    while True:
+        try:
+            lambda_client.create_function(
+                FunctionName=function_name,
+                Runtime=runtime,
+                Role=role_arn,  # The ARN of the IAM role
+                Handler=handler,
+                Code={"ZipFile": zip_bytes},
+                Description=description,
+                Timeout=timeout,
+                MemorySize=memory_size,
+                Publish=publish,
+            )
+            return
+        except ClientError as e:
+            retriable = (
+                e.response["Error"]["Code"] == "InvalidParameterValueException"
+                and "cannot be assumed" in e.response["Error"].get("Message", "")
+            )
+            if not retriable or time.time() >= deadline:
+                raise
+            logger.info("  waiting for the IAM role to propagate to Lambda...")
+            time.sleep(3)
+
+
+def ensure_function_url(session, function_name, region):
+    """A public function URL (AuthType NONE) + the invoke permission that
+    makes it reachable. Idempotent.
+
+    Two grants are required (AWS change, October 2025): InvokeFunctionUrl
+    for the URL itself, and InvokeFunction scoped to URL calls via the
+    lambda:InvokedViaFunctionUrl condition. Missing either = 403 Forbidden.
+    Permissions FIRST, then the URL config.
+    """
+    lc = session.client("lambda", region_name=region)
+    grants = [
+        {
+            "StatementId": "FunctionURLAllowPublicAccess",
+            "Action": "lambda:InvokeFunctionUrl",
+            "Principal": "*",
+            "FunctionUrlAuthType": "NONE",
+        },
+        {
+            "StatementId": "FunctionURLInvokeAllowPublicAccess",
+            "Action": "lambda:InvokeFunction",
+            "Principal": "*",
+            "InvokedViaFunctionUrl": True,
+        },
+    ]
+    for grant in grants:
+        try:
+            lc.add_permission(FunctionName=function_name, **grant)
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ResourceConflictException":  # already granted
+                raise
+    try:
+        resp = lc.get_function_url_config(FunctionName=function_name)
+    except lc.exceptions.ResourceNotFoundException:
+        resp = lc.create_function_url_config(FunctionName=function_name, AuthType="NONE")
+        logger.info(f"Created function URL for {function_name}: {resp['FunctionUrl']}")
+    return resp["FunctionUrl"]
+
+
+def read_function_url(session, function_name, region):
+    lc = session.client("lambda", region_name=region)
+    try:
+        return lc.get_function_url_config(FunctionName=function_name)["FunctionUrl"]
+    except lc.exceptions.ResourceNotFoundException:
+        return None
 
 
 def lambda_read(session, func_name, region):
