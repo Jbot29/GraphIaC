@@ -43,7 +43,7 @@ def test_lambda_ui_policy_covers_every_wall_hit_in_the_field():
     actions = _actions(_policy_for("lambda-ui.giac"))
     for action in ["cognito-idp:CreateUserPool", "iam:CreateRole", "iam:PassRole",
                    "lambda:AddPermission", "lambda:CreateFunctionUrlConfig",
-                   "iam:UpdateAssumeRolePolicy"]:
+                   "iam:UpdateAssumeRolePolicy", "cognito-idp:AdminGetUser"]:
         assert action in actions, action
 
 

@@ -24,8 +24,13 @@ class CognitoUserPool(BaseNode):
         "cognito-idp:ListUserPools",
         "cognito-idp:UpdateUserPool",
         "cognito-idp:DeleteUserPool",
-        "cognito-idp:AdminCreateUser",  # the first-user walkthrough
+        # user management is the deploy identity's job (the walkthroughs
+        # and, later, the hosted UI's user admin)
+        "cognito-idp:AdminCreateUser",
         "cognito-idp:AdminSetUserPassword",
+        "cognito-idp:AdminGetUser",
+        "cognito-idp:AdminDeleteUser",
+        "cognito-idp:ListUsers",
     ]
 
     pool_name: str
