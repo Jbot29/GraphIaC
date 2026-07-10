@@ -1,4 +1,4 @@
-from typing import Dict, Literal, Optional
+from typing import ClassVar, Dict, Literal, Optional
 
 from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field
@@ -20,6 +20,15 @@ class DynamoKey(BaseModel):
 
 
 class DynamoTable(BaseNode):
+    deploy_actions: ClassVar[list] = [
+        "dynamodb:CreateTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:UpdateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:ListTagsOfResource",
+        "dynamodb:TagResource",
+    ]
+
     table_name: str = Field(..., alias="table_name")
     region: str = "us-east-2"
     partition_key: DynamoKey

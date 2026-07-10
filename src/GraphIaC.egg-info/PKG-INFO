@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: GraphIaC
-Version: 0.0.23
+Version: 0.0.24
 Summary: GraphIaC
 Author-email: Jeremy Schwartz <jerschwartz@gmail.com>
 Project-URL: Homepage, https://github.com/Jbot29/GraphIaC
@@ -39,6 +39,8 @@ Tools like Terraform and Pulumi make it easy to define individual resources. The
 GraphIaC promotes connections to first-class citizens. When you write `cf -> bucket`, the edge already knows it means an Origin Access Control bucket policy — it queries the graph for the relevant ARNs and provisions everything itself. You declare the connection; the edge handles the boilerplate.
 
 Because AWS permission patterns are stable, that knowledge gets written once into the edge class and reused everywhere. And because the infrastructure is a graph, the diagram you see in the UI is never out of date — it *is* the code.
+
+![The GraphIaC editor: a .giac file and its live infrastructure graph](screenshot.png)
 
 ## Quick Start
 

@@ -56,13 +56,34 @@ def main():
     parser.add_argument("profile", help="Aws Profile to use")
     parser.add_argument("--infra_file", help="Path to the infrastructure definition (.py or .giac)")
     parser.add_argument("--port", type=int, default=8642, help="Port for the serve command")
+    parser.add_argument("--all", action="store_true",
+                        help="policy: cover every registered type, not just the infra file's")
     parser.add_argument(
         "command",
-        choices=["plan", "run", "diagram", "verify", "serve"],
-        help="The command to run (e.g., plan, run, verify, serve)",
+        choices=["plan", "run", "diagram", "verify", "serve", "policy"],
+        help="The command to run (e.g., plan, run, verify, serve, policy)",
     )
 
     args = parser.parse_args()
+
+    if args.command == "policy":
+        # pure generation — reads the source (or the registry), never AWS
+        from GraphIaC import deploy_policy, dsl
+
+        if args.all or not args.infra_file:
+            print(deploy_policy.render(deploy_policy.policy_for_all()))
+            return
+        if not args.infra_file.endswith(".giac"):
+            print("policy generation needs a .giac infra file (or use --all)")
+            raise SystemExit(1)
+        with open(args.infra_file) as f:
+            res = dsl.parse(f.read())
+        if res["errors"]:
+            for e in res["errors"]:
+                logger.error(f"{args.infra_file}:{e['line']}: {e['msg']}")
+            raise SystemExit(1)
+        print(deploy_policy.render(deploy_policy.policy_for_graph(res["graph"])))
+        return
 
     if not args.infra_file:
         print("Infra file needed")

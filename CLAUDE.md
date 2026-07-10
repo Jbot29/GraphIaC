@@ -150,10 +150,14 @@ Run the DSL tests: `pytest tests/test_dsl.py tests/test_dsl_load.py` and `node -
 
 Shared `colorlog` setup. Call `setup_logger()` in new modules rather than calling `logging` directly.
 
+### Deploy Policy Generation (`src/GraphIaC/deploy_policy.py`)
+
+Every node/edge class declares `deploy_actions` (ClassVar) — the IAM actions its read/create/update/delete/verify calls need. `python -m GraphIaC <profile> --infra_file site.giac policy` generates the minimal deploy policy for that file (`policy --all` for the full catalog). `DeployRole` (`aws/deploy_role.py`, used by `examples/get-started/setup.giac`) is the self-describing bootstrap: an IAM role whose inline policy is the full catalog, re-synced on `update`, audited by `verify`. Actions-first (Resource "*"); resource-level scoping is future work.
+
 ## Adding a New AWS Resource
 
 1. Create `src/GraphIaC/aws/<service>.py` with a `BaseNode` subclass and any needed `BaseEdge` subclasses
-2. Implement `read`, `create`, `update`, `delete` on each
+2. Implement `read`, `create`, `update`, `delete` on each — and declare `deploy_actions` (the IAM actions those methods call)
 3. Register the new classes in `model_map.py`
 4. Export from `src/GraphIaC/__init__.py` if user-facing
 5. Add an example under `examples/`

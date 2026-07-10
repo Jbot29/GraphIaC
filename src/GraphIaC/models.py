@@ -13,6 +13,12 @@ class VerifyResult(BaseModel):
 class BaseNode(BaseModel):
     g_id: str
 
+    # The IAM actions the DEPLOY identity needs so this class's
+    # read/create/update/delete/verify can run — introspected by
+    # deploy_policy.py to generate minimal deploy policies (the same
+    # pattern as the DSL registry). Declare on every concrete class.
+    deploy_actions: ClassVar[list] = []
+
     @property
     def read_id(self) -> Optional[str]:
         return None
@@ -76,6 +82,9 @@ class BaseEdge(BaseModel):
     # of letting create() fail against AWS. Data-shaped dependencies use
     # attribute references instead; this flag is for relationship-shaped ones.
     gates_destination: ClassVar[bool] = False
+
+    # See BaseNode.deploy_actions.
+    deploy_actions: ClassVar[list] = []
 
     @property
     def source_g_id(self):

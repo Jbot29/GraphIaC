@@ -1,5 +1,5 @@
 import json
-from typing import Optional
+from typing import ClassVar, Optional
 
 from botocore.exceptions import ClientError
 
@@ -11,6 +11,19 @@ logger = setup_logger()
 
 
 class S3Bucket(BaseNode):
+    deploy_actions: ClassVar[list] = [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:ListBucket",
+        "s3:ListBucketVersions",
+        "s3:GetBucketLocation",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetBucketPolicy",
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
+    ]
+
     bucket_name: str
     region: Optional[str] = None
 

@@ -15,6 +15,8 @@ GraphIaC promotes connections to first-class citizens. When you write `cf -> buc
 
 Because AWS permission patterns are stable, that knowledge gets written once into the edge class and reused everywhere. And because the infrastructure is a graph, the diagram you see in the UI is never out of date — it *is* the code.
 
+![The GraphIaC editor: a .giac file and its live infrastructure graph](screenshot.png)
+
 ## Quick Start
 
 **1. Install (or upgrade):**

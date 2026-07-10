@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import ClassVar, List, Optional
 
 from botocore.exceptions import ClientError
 
@@ -18,6 +18,12 @@ logger = setup_logger()
 
 
 class SESDomainIdentity(BaseNode):
+    deploy_actions: ClassVar[list] = [
+        "ses:CreateEmailIdentity",
+        "ses:GetEmailIdentity",
+        "ses:DeleteEmailIdentity",
+    ]
+
     domain: str
     region: str = "us-east-1"
     dkim_tokens: Optional[List[str]] = None
@@ -79,6 +85,11 @@ class SESDomainRoute53Edge(BaseEdge):
     Wires an SES domain identity to a Route53 hosted zone by creating the
     three DKIM CNAME records that SES requires for domain verification.
     """
+
+    deploy_actions: ClassVar[list] = [
+        "route53:ChangeResourceRecordSets",
+        "route53:ListResourceRecordSets",
+    ]
 
     ses_g_id: str
     zone_g_id: str
@@ -189,6 +200,12 @@ class SESDomainRoute53Edge(BaseEdge):
 
 
 class LambdaSESEdge(IAMRoleInlinePolicyEdge):
+    deploy_actions: ClassVar[list] = [
+        "iam:PutRolePolicy",
+        "iam:GetRolePolicy",
+        "sts:GetCallerIdentity",
+    ]
+
     """
     Grants a Lambda's execution role permission to send email via SES
     from the given domain identity.

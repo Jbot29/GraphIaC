@@ -1,0 +1,2 @@
+# the bootstrap: GraphIaC deploying its own deployer
+graphiac-deploy : DeployRole

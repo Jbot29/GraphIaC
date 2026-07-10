@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Optional
+from typing import ClassVar, Optional
 
 from botocore.exceptions import ClientError
 from pydantic import Field
@@ -52,6 +52,13 @@ stmt = IamTrustPolicyStatement(
 
 
 class IAMRolePolicyLambdaEdge(IAMRolePolicyEdge):
+    deploy_actions: ClassVar[list] = [
+        "iam:AttachRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:GetRole",
+        "iam:UpdateAssumeRolePolicy",
+    ]
+
     policy_arn: str = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
     def read(self, session, G):
@@ -88,6 +95,19 @@ class IAMRolePolicyLambdaEdge(IAMRolePolicyEdge):
 
 
 class LambdaZipFile(BaseNode):
+    deploy_actions: ClassVar[list] = [
+        "lambda:CreateFunction",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:DeleteFunction",
+        "lambda:CreateFunctionUrlConfig",
+        "lambda:GetFunctionUrlConfig",
+        "lambda:AddPermission",
+        "iam:PassRole",  # create_function hands the execution role to Lambda
+    ]
+
     name: AwsName
     region: str = "us-east-2"
     runtime: str

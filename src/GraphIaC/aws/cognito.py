@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import ClassVar, List, Optional
 
 from botocore.exceptions import ClientError
 
@@ -17,6 +17,16 @@ class CognitoUserPool(BaseNode):
     created by an admin), email as the sign-in name, and a real password
     minimum. verify() audits exactly those.
     """
+
+    deploy_actions: ClassVar[list] = [
+        "cognito-idp:CreateUserPool",
+        "cognito-idp:DescribeUserPool",
+        "cognito-idp:ListUserPools",
+        "cognito-idp:UpdateUserPool",
+        "cognito-idp:DeleteUserPool",
+        "cognito-idp:AdminCreateUser",  # the first-user walkthrough
+        "cognito-idp:AdminSetUserPassword",
+    ]
 
     pool_name: str
     region: str = "us-east-2"
@@ -156,6 +166,13 @@ class CognitoUserPoolClient(BaseNode):
     """An app client on a user pool. Metadata-only (like ApiEndpoint): the
     CognitoPoolClientEdge does the AWS work, because a client only exists
     on a pool."""
+
+    deploy_actions: ClassVar[list] = [
+        "cognito-idp:CreateUserPoolClient",
+        "cognito-idp:DescribeUserPoolClient",
+        "cognito-idp:ListUserPoolClients",
+        "cognito-idp:DeleteUserPoolClient",
+    ]
 
     client_name: str
     callback_urls: List[str] = []
@@ -322,6 +339,13 @@ class CognitoLambdaAuthEdge(BaseEdge):
     variables the function's runtime needs to log users in and validate
     their sessions. The pool is discovered through the graph (the client's
     CognitoPoolClientEdge), so the user declares only the arrow."""
+
+    deploy_actions: ClassVar[list] = [
+        "cognito-idp:ListUserPoolClients",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "lambda:UpdateFunctionConfiguration",
+    ]
 
     client_g_id: str
     fn_g_id: str

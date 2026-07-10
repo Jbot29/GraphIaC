@@ -14,6 +14,7 @@ from GraphIaC.aws.cognito import (
     CognitoUserPool,
     CognitoUserPoolClient,
 )
+from GraphIaC.aws.deploy_role import DeployRole
 from GraphIaC.aws.dynamodb import DynamoTable
 from GraphIaC.aws.ec2.alb import ALB
 from GraphIaC.aws.ec2.listener import Listener
@@ -54,6 +55,7 @@ BASE_MODEL_MAP = {
     "CognitoUserPoolClient": CognitoUserPoolClient,
     "CognitoPoolClientEdge": CognitoPoolClientEdge,
     "CognitoLambdaAuthEdge": CognitoLambdaAuthEdge,
+    "DeployRole": DeployRole,
     "DynamoTable": DynamoTable,
     "LambdaDynamoEdge": LambdaDynamoEdge,
     "ApiSite": ApiSite,

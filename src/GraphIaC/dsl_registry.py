@@ -32,6 +32,7 @@ VERSION = "0.1"
 # node type -> the field the label defaults into (see dsl/spec.md "Name defaulting")
 NAME_FIELDS = {
     "CognitoUserPool": "pool_name",
+    "DeployRole": "name",
     "CognitoUserPoolClient": "client_name",
     "S3Bucket": "bucket_name",
     "DynamoTable": "table_name",

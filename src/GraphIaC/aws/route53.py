@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import ClassVar, Optional
 
 from botocore.exceptions import ClientError
 
@@ -13,6 +13,11 @@ CLOUDFRONT_HOSTED_ZONE_ID = "Z2FDTNDATAQYW2"
 
 
 class HostedZone(BaseNode):
+    deploy_actions: ClassVar[list] = [
+        "route53:ListHostedZones",
+        "route53:GetHostedZone",
+    ]
+
     domain_name: str
     zone_id: Optional[str] = None
 
@@ -50,6 +55,11 @@ class HostedZone(BaseNode):
 
 
 class Route53AliasRecord(BaseNode):
+    deploy_actions: ClassVar[list] = [
+        "route53:ChangeResourceRecordSets",
+        "route53:ListResourceRecordSets",
+    ]
+
     """An A alias record in Route53 — typically used to point a domain at a CloudFront distribution."""
 
     domain_name: str  # e.g. "begriff.co" or "www.begriff.co"
