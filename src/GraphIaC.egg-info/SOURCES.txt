@@ -4,6 +4,7 @@ pyproject.toml
 src/GraphIaC/__init__.py
 src/GraphIaC/__main__.py
 src/GraphIaC/db.py
+src/GraphIaC/deploy_policy.py
 src/GraphIaC/dsl.py
 src/GraphIaC/dsl_registry.py
 src/GraphIaC/logs.py
@@ -22,6 +23,7 @@ src/GraphIaC/aws/certificate.py
 src/GraphIaC/aws/cloudfront.py
 src/GraphIaC/aws/cloudwatch.py
 src/GraphIaC/aws/cognito.py
+src/GraphIaC/aws/deploy_role.py
 src/GraphIaC/aws/dynamodb.py
 src/GraphIaC/aws/ec2_sg.py
 src/GraphIaC/aws/iam_policy.py
@@ -53,6 +55,7 @@ src/GraphIac/aws/route53.py
 src/GraphIac/aws/s3.py
 src/GraphIac/aws/types.py
 tests/test_cognito.py
+tests/test_deploy_policy.py
 tests/test_dsl.py
 tests/test_dsl_load.py
 tests/test_edge_reads.py
