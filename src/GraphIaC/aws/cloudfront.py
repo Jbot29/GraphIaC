@@ -14,6 +14,18 @@ _CACHING_OPTIMIZED_POLICY_ID = "658327ea-f89d-4fab-a63d-7e88639e58f6"
 
 
 class CloudFrontDistribution(BaseNode):
+    deploy_actions: ClassVar[list] = [
+        "cloudfront:CreateDistribution",
+        "cloudfront:GetDistribution",
+        "cloudfront:GetDistributionConfig",
+        "cloudfront:UpdateDistribution",
+        "cloudfront:DeleteDistribution",
+        "cloudfront:ListDistributions",
+        "cloudfront:CreateOriginAccessControl",
+        "cloudfront:GetOriginAccessControl",
+        "cloudfront:DeleteOriginAccessControl",
+    ]
+
     domain_name: str          # custom domain alias, e.g. "begriff.co"
     # ACM certificate ARN (us-east-1). Usually left unset: an
     # ACMCertificateCloudFrontEdge (cert -> cf) supplies it from the graph.
@@ -299,6 +311,13 @@ class ACMCertificateCloudFrontEdge(BaseEdge):
 
     gates_destination: ClassVar[bool] = True
 
+    deploy_actions: ClassVar[list] = [
+        "cloudfront:GetDistributionConfig",
+        "cloudfront:UpdateDistribution",
+        "acm:ListCertificates",
+        "acm:DescribeCertificate",
+    ]
+
     cert_g_id: str
     cf_g_id: str
 
@@ -391,6 +410,12 @@ class ACMCertificateCloudFrontEdge(BaseEdge):
 
 
 class CloudFrontS3OACEdge(BaseEdge):
+    deploy_actions: ClassVar[list] = [
+        "s3:PutBucketPolicy",
+        "s3:GetBucketPolicy",
+        "cloudfront:GetDistribution",
+    ]
+
     """
     Locks an S3 bucket so only the paired CloudFront distribution can read from it.
     Sets a bucket policy that allows the CloudFront service principal conditioned on
@@ -510,6 +535,12 @@ class CloudFrontS3OACEdge(BaseEdge):
 
 
 class CloudFrontRoute53Edge(BaseEdge):
+    deploy_actions: ClassVar[list] = [
+        "route53:ChangeResourceRecordSets",
+        "route53:ListResourceRecordSets",
+        "cloudfront:GetDistribution",
+    ]
+
     """
     Creates a Route53 A alias record pointing a domain at a CloudFront distribution.
     Reads the distribution domain name from the graph at create() time, so it works
@@ -626,6 +657,15 @@ class CloudFrontRoute53Edge(BaseEdge):
 class CloudFrontFunction(BaseNode):
     """A CloudFront Function (viewer-request handler) managed as a graph node."""
 
+    deploy_actions: ClassVar[list] = [
+        "cloudfront:CreateFunction",
+        "cloudfront:DescribeFunction",
+        "cloudfront:GetFunction",
+        "cloudfront:UpdateFunction",
+        "cloudfront:PublishFunction",
+        "cloudfront:DeleteFunction",
+    ]
+
     name: str                          # CloudFront function name (unique per account)
     function_code: str                 # JavaScript source code
     comment: str = ""
@@ -723,6 +763,12 @@ class CloudFrontFunction(BaseNode):
 
 
 class CloudFrontFunctionEdge(BaseEdge):
+    deploy_actions: ClassVar[list] = [
+        "cloudfront:GetDistributionConfig",
+        "cloudfront:UpdateDistribution",
+        "cloudfront:DescribeFunction",
+    ]
+
     """
     Associates a CloudFrontFunction with a CloudFrontDistribution on the viewer-request
     event of the default cache behavior. The edge holds the wiring intelligence: which

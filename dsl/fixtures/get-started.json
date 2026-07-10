@@ -1,0 +1,14 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "graphiac-deploy",
+        "type": "DeployRole",
+        "fields": { "name": "graphiac-deploy" },
+        "line": 2
+      }
+    ],
+    "edges": []
+  },
+  "errors": []
+}

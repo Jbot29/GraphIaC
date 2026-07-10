@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional
+from typing import ClassVar, List, Literal, Optional
 
 import boto3
 
@@ -10,6 +10,15 @@ logger = setup_logger()
 
 
 class ApiSite(BaseNode):
+    # API Gateway v2 authorizes via apigateway:<HTTP-verb> on its REST surface
+    deploy_actions: ClassVar[list] = [
+        "apigateway:GET",
+        "apigateway:POST",
+        "apigateway:PATCH",
+        "apigateway:PUT",
+        "apigateway:DELETE",
+    ]
+
     site_name: str
     protocol: Literal["HTTP"] = "HTTP"
     stage: str = "$default"
@@ -51,6 +60,11 @@ class ApiEndpoint(BaseNode):
 
 
 class SiteEndpointEdge(BaseEdge):
+    deploy_actions: ClassVar[list] = [
+        "apigateway:GET",
+        "apigateway:POST",
+    ]
+
     site_node_g_id: str
     endpoint_node_g_id: str
 
@@ -77,6 +91,14 @@ class SiteEndpointEdge(BaseEdge):
 
 
 class EndpointLambdaEdge(BaseEdge):
+    deploy_actions: ClassVar[list] = [
+        "apigateway:GET",
+        "apigateway:POST",
+        "apigateway:PATCH",
+        "lambda:AddPermission",
+        "lambda:GetPolicy",
+    ]
+
     endpoint_node_g_id: str
     lambda_node_g_id: str
 

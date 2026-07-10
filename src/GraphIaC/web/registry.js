@@ -469,6 +469,31 @@ return {
       },
       "nameField": "client_name"
     },
+    "DeployRole": {
+      "fields": {
+        "account_id": {
+          "default": null,
+          "required": false
+        },
+        "arn": {
+          "default": null,
+          "required": false
+        },
+        "inline_policy": {
+          "default": null,
+          "required": false
+        },
+        "name": {
+          "default": "graphiac-deploy",
+          "required": false
+        },
+        "trust_policy": {
+          "default": null,
+          "required": false
+        }
+      },
+      "nameField": "name"
+    },
     "DynamoTable": {
       "fields": {
         "billing_mode": {

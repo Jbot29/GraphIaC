@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import ClassVar, Optional
 
 from botocore.exceptions import ClientError
 
@@ -10,6 +10,14 @@ logger = setup_logger()
 
 
 class ACMCertificate(BaseNode):
+    deploy_actions: ClassVar[list] = [
+        "acm:RequestCertificate",
+        "acm:DescribeCertificate",
+        "acm:ListCertificates",
+        "acm:DeleteCertificate",
+        "acm:AddTagsToCertificate",
+    ]
+
     domain_name: str
     arn: Optional[str] = None
     status: Optional[str] = None  # PENDING_VALIDATION, ISSUED, FAILED, EXPIRED, etc.
@@ -117,6 +125,12 @@ class ACMCertificateHostedZoneEdge(BaseEdge):
     records in Route53. ACM requires these records to prove domain ownership before
     issuing the certificate.
     """
+
+    deploy_actions: ClassVar[list] = [
+        "acm:DescribeCertificate",
+        "route53:ChangeResourceRecordSets",
+        "route53:ListResourceRecordSets",
+    ]
 
     cert_g_id: str
     hz_g_id: str

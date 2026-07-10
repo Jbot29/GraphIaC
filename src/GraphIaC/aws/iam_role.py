@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Optional
+from typing import ClassVar, Optional
 
 from botocore.exceptions import ClientError
 
@@ -45,6 +45,17 @@ IAM Role
 
 
 class IAMRole(BaseNode):
+    deploy_actions: ClassVar[list] = [
+        "iam:CreateRole",
+        "iam:GetRole",
+        "iam:DeleteRole",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
+        "iam:DeleteRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:ListInstanceProfilesForRole",
+    ]
+
     g_id: str
     name: AwsName
     trust_policy: Optional[IamTrustPolicyDocument] = None
@@ -124,6 +135,12 @@ class IAMRolePolicyEdge(BaseEdge):
 
 
 class IAMRoleInlinePolicyEdge(BaseEdge):
+    deploy_actions: ClassVar[list] = [
+        "iam:PutRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:DeleteRolePolicy",
+    ]
+
     role_g_id: str
 
     @property

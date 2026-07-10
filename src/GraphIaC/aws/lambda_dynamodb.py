@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import ClassVar, Optional
 
 from .iam_policy import (
     IamPolicyDocument,
@@ -10,6 +10,12 @@ from .iam_role import IAMRoleInlinePolicyEdge
 
 
 class LambdaDynamoEdge(IAMRoleInlinePolicyEdge):
+    deploy_actions: ClassVar[list] = [
+        "iam:PutRolePolicy",
+        "iam:GetRolePolicy",
+        "dynamodb:DescribeTable",
+    ]
+
     role_g_id: str
     lambda_node_g_id: str
     dynamo_node_g_id: str

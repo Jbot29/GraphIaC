@@ -1,0 +1,19 @@
+# GraphIaC get-started — the first thing you run, once, with an
+# admin-ish profile (see README.md for the two manual steps before this).
+#
+#   python -m GraphIaC <bootstrap-profile> --infra_file setup.giac run
+#
+# It creates ONE thing: the deploy role. GraphIaC deploying its own
+# deployer — the role's policy is generated from every node and edge
+# type GraphIaC knows, so it covers every example out of the box. After
+# a pip upgrade brings new services, run this again and the policy
+# re-syncs (`verify` tells you when it's out of date).
+#
+# The run prints a [profile graphiac] snippet to paste into
+# ~/.aws/config — use THAT profile for every GraphIaC command after
+# this; the bootstrap profile goes back in the drawer.
+#
+# Prefer a minimal policy scoped to one infra file instead? See:
+#   python -m GraphIaC <profile> --infra_file <your>.giac policy
+
+graphiac-deploy : DeployRole
