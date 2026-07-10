@@ -12,14 +12,16 @@
 #   python -m GraphIaC <aws-profile> --infra_file ui.giac run
 #
 # The function URL is printed on create (and lands in the state DB). Make
-# yourself a user, then sign in:
+# yourself a user — note --user-pool-id takes the pool ID (us-east-2_XXXX,
+# printed on create), not the pool name — and set a PERMANENT password
+# (a temporary one puts the user in a challenge state miniui's simple
+# login doesn't handle; 12+ chars, upper/lower/number per the pool policy):
 #
 #   aws cognito-idp admin-create-user --user-pool-id <pool_id> \
-#       --username you@example.com --temporary-password 'Xyz...12chars' \
+#       --username you@example.com --message-action SUPPRESS --profile <aws-profile>
+#   aws cognito-idp admin-set-user-password --user-pool-id <pool_id> \
+#       --username you@example.com --password '<12+ chars>' --permanent \
 #       --profile <aws-profile>
-#
-# (Cognito will make you set a real password on first sign-in via the
-# temporary one; miniui handles the happy path once the password is set.)
 
 mini-ui-users : CognitoUserPool(region: "us-east-2")
 mini-ui-login : CognitoUserPoolClient(password_auth: true)
