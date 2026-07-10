@@ -6,11 +6,28 @@ from pydantic import Field
 
 from ..logs import setup_logger
 from ..models import BaseNode
-from .iam_policy import IamTrustPolicyStatement
+from .iam_policy import (
+    IamTrustPolicyStatement,
+    get_trust_policy_for_role,
+    upsert_trust_statement_for_role,
+)
 from .iam_role import IAMRolePolicyEdge, attach_role_policy
 from .types import AwsName
 
 logger = setup_logger()
+
+
+def _lambda_trusted(doc):
+    """Does any statement already let lambda.amazonaws.com assume the role?"""
+    for s in doc.Statement:
+        if s.Effect != "Allow":
+            continue
+        svc = s.Principal.get("Service")
+        services = [svc] if isinstance(svc, str) else (svc or [])
+        actions = [s.Action] if isinstance(s.Action, str) else s.Action
+        if "lambda.amazonaws.com" in services and "sts:AssumeRole" in actions:
+            return True
+    return False
 
 # TODO: Zipfile compare sha
 
@@ -53,7 +70,12 @@ class IAMRolePolicyLambdaEdge(IAMRolePolicyEdge):
     def create(self, session, G):
         role_name = G.nodes[self.role_g_id]["data"].read_id
         attach_role_policy(session, role_name, self.policy_arn)
-        # add the trust relationship
+
+        # an imported role may not trust Lambda yet — assert it (roles
+        # GraphIaC creates already have it, so this is usually a no-op)
+        if not _lambda_trusted(get_trust_policy_for_role(session, role_name)):
+            upsert_trust_statement_for_role(session, role_name, stmt)
+            logger.info(f"Added Lambda trust to role {role_name}")
 
         return True
 

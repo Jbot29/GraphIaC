@@ -73,3 +73,53 @@ def test_plan_converges_for_role_policy_edge(aws):
 
     GraphIaC.run(state)
     assert GraphIaC.plan(state) == []
+
+
+def test_role_create_without_trust_policy_defaults_to_lambda(aws):
+    """The MalformedPolicyDocument bug: a bare IAMRole (trust_policy=None)
+    must create with a valid document that lets Lambda assume it."""
+    import json
+
+    G = nx.DiGraph()
+    role = IAMRole(g_id="role", name="bare-role")
+    assert role.create(aws, G) is True
+    assert role.arn
+
+    doc = aws.client("iam").get_role(RoleName="bare-role")["Role"]["AssumeRolePolicyDocument"]
+    if isinstance(doc, str):
+        doc = json.loads(doc)
+    principals = [s.get("Principal", {}).get("Service") for s in doc["Statement"]]
+    assert "lambda.amazonaws.com" in principals
+
+
+def test_lambda_edge_adds_trust_to_imported_role(aws):
+    """A pre-existing role that doesn't trust Lambda gets the trust
+    statement asserted by the edge (imported-role path)."""
+    import json
+
+    iam = aws.client("iam")
+    ec2_trust = {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"},
+                       "Action": "sts:AssumeRole"}],
+    }
+    iam.create_role(RoleName="imported-role", AssumeRolePolicyDocument=json.dumps(ec2_trust))
+
+    G = nx.DiGraph()
+    G.add_node("role", data=IAMRole(g_id="role", name="imported-role"))
+    edge = IAMRolePolicyLambdaEdge(role_g_id="role", node_g_id="fn")
+    edge.create(aws, G)
+
+    doc = iam.get_role(RoleName="imported-role")["Role"]["AssumeRolePolicyDocument"]
+    if isinstance(doc, str):
+        doc = json.loads(doc)
+    services = [s.get("Principal", {}).get("Service") for s in doc["Statement"]]
+    assert "lambda.amazonaws.com" in services
+    assert "ec2.amazonaws.com" in services  # existing trust untouched
+
+    # second create: no duplicate statement
+    edge.create(aws, G)
+    doc = iam.get_role(RoleName="imported-role")["Role"]["AssumeRolePolicyDocument"]
+    if isinstance(doc, str):
+        doc = json.loads(doc)
+    assert len(doc["Statement"]) == 2
