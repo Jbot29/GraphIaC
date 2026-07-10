@@ -243,23 +243,32 @@ def ensure_function_url(session, function_name, region):
     """A public function URL (AuthType NONE) + the invoke permission that
     makes it reachable. Idempotent.
 
-    Permission FIRST, then the URL config: the URL's auth layer can cache
-    its policy evaluation from creation time, and a URL created before its
-    invoke grant exists has been seen to stay 403 Forbidden even after the
-    grant lands.
+    Two grants are required (AWS change, October 2025): InvokeFunctionUrl
+    for the URL itself, and InvokeFunction scoped to URL calls via the
+    lambda:InvokedViaFunctionUrl condition. Missing either = 403 Forbidden.
+    Permissions FIRST, then the URL config.
     """
     lc = session.client("lambda", region_name=region)
-    try:
-        lc.add_permission(
-            FunctionName=function_name,
-            StatementId="FunctionURLAllowPublicAccess",
-            Action="lambda:InvokeFunctionUrl",
-            Principal="*",
-            FunctionUrlAuthType="NONE",
-        )
-    except ClientError as e:
-        if e.response["Error"]["Code"] != "ResourceConflictException":  # already granted
-            raise
+    grants = [
+        {
+            "StatementId": "FunctionURLAllowPublicAccess",
+            "Action": "lambda:InvokeFunctionUrl",
+            "Principal": "*",
+            "FunctionUrlAuthType": "NONE",
+        },
+        {
+            "StatementId": "FunctionURLInvokeAllowPublicAccess",
+            "Action": "lambda:InvokeFunction",
+            "Principal": "*",
+            "InvokedViaFunctionUrl": True,
+        },
+    ]
+    for grant in grants:
+        try:
+            lc.add_permission(FunctionName=function_name, **grant)
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ResourceConflictException":  # already granted
+                raise
     try:
         resp = lc.get_function_url_config(FunctionName=function_name)
     except lc.exceptions.ResourceNotFoundException:

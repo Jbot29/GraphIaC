@@ -70,6 +70,14 @@ def test_run_wires_url_and_auth_env(aws, zip_path, tmp_path):
     url = lc.get_function_url_config(FunctionName="ui-app")["FunctionUrl"]
     assert url.startswith("https://")
 
+    # BOTH public grants (AWS requires the pair since Oct 2025; missing
+    # either one = 403 Forbidden at the URL)
+    import json as _json
+
+    policy = _json.loads(lc.get_policy(FunctionName="ui-app")["Policy"])
+    actions = {s["Action"] for s in policy["Statement"]}
+    assert {"lambda:InvokeFunctionUrl", "lambda:InvokeFunction"} <= actions
+
     env = lc.get_function_configuration(FunctionName="ui-app")["Environment"]["Variables"]
     idp = aws.client("cognito-idp", region_name=REGION)
     pool_id = idp.list_user_pools(MaxResults=10)["UserPools"][0]["Id"]
