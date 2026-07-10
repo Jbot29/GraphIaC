@@ -95,7 +95,9 @@ class DeployRole(IAMRole):
         self._put_policy(session)
         logger.info(f"Created deploy role {self.name} with the full GraphIaC policy")
         logger.info(
-            "Add this profile to ~/.aws/config and use it for every GraphIaC command:\n"
+            "Append this NEW profile section to ~/.aws/config (keep your existing "
+            "profile — this one borrows its credentials) and use it for every "
+            "GraphIaC command:\n"
             f"    [profile graphiac]\n"
             f"    role_arn = {self.arn}\n"
             f"    source_profile = <the profile you just ran this with>\n"

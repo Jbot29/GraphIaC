@@ -34,7 +34,10 @@ This creates a single IAM role, `graphiac-deploy`, whose policy is
 IAM actions it needs, and the role's policy is their union. It covers every
 example out of the box, and re-running setup after an upgrade re-syncs it.
 
-The run prints a profile snippet. Paste it into `~/.aws/config`:
+The run prints a profile snippet. Append it to `~/.aws/config` as a **new
+section** — keep your `[profile bootstrap]` section as-is (the new profile
+holds no credentials of its own; `source_profile` tells it to borrow
+bootstrap's keys to assume the role):
 
 ```ini
 [profile graphiac]
