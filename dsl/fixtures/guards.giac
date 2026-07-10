@@ -1,0 +1,17 @@
+# guards: declared safety invariants, checked independently of the
+# code that provisions
+domain = "x.co"
+
+hz     : HostedZone(domain_name: domain)
+cert   : ACMCertificate(domain_name: domain)
+bucket : S3Bucket("x-co-site")
+cf     : CloudFrontDistribution(domain_name: domain)
+
+cert -> hz
+cert -> cf
+cf   -> bucket
+cf   -> hz : (domain_name: domain)
+
+? private(bucket)
+? https-only(cf)
+? locked-to(bucket, cf)

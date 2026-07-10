@@ -4,19 +4,25 @@
       {
         "g_id": "hz",
         "type": "HostedZone",
-        "fields": { "domain_name": "begrif.co" },
+        "fields": {
+          "domain_name": "begrif.co"
+        },
         "line": 4
       },
       {
         "g_id": "cert",
         "type": "ACMCertificate",
-        "fields": { "domain_name": "begrif.co" },
+        "fields": {
+          "domain_name": "begrif.co"
+        },
         "line": 5
       },
       {
         "g_id": "bucket",
         "type": "S3Bucket",
-        "fields": { "bucket_name": "begrif-co-site" },
+        "fields": {
+          "bucket_name": "begrif-co-site"
+        },
         "line": 6
       },
       {
@@ -24,7 +30,12 @@
         "type": "CloudFrontDistribution",
         "fields": {
           "domain_name": "begrif.co",
-          "cert_arn": { "$ref": { "g_id": "cert", "field": "arn" } }
+          "cert_arn": {
+            "$ref": {
+              "g_id": "cert",
+              "field": "arn"
+            }
+          }
         },
         "line": 7
       }
@@ -32,23 +43,34 @@
     "edges": [
       {
         "type": "ACMCertificateHostedZoneEdge",
-        "fields": { "cert_g_id": "cert", "hz_g_id": "hz" },
+        "fields": {
+          "cert_g_id": "cert",
+          "hz_g_id": "hz"
+        },
         "inferred": true,
         "line": 9
       },
       {
         "type": "CloudFrontS3OACEdge",
-        "fields": { "cf_g_id": "cf", "s3_g_id": "bucket" },
+        "fields": {
+          "cf_g_id": "cf",
+          "s3_g_id": "bucket"
+        },
         "inferred": true,
         "line": 10
       },
       {
         "type": "CloudFrontRoute53Edge",
-        "fields": { "cf_g_id": "cf", "hz_g_id": "hz", "domain_name": "begrif.co" },
+        "fields": {
+          "cf_g_id": "cf",
+          "hz_g_id": "hz",
+          "domain_name": "begrif.co"
+        },
         "inferred": true,
         "line": 11
       }
-    ]
+    ],
+    "guards": []
   },
   "errors": []
 }

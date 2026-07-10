@@ -4,19 +4,25 @@
       {
         "g_id": "mail",
         "type": "SESDomainIdentity",
-        "fields": { "domain": "begrif.co" },
+        "fields": {
+          "domain": "begrif.co"
+        },
         "line": 3
       },
       {
         "g_id": "hz",
         "type": "HostedZone",
-        "fields": { "domain_name": "begrif.co" },
+        "fields": {
+          "domain_name": "begrif.co"
+        },
         "line": 4
       },
       {
         "g_id": "role",
         "type": "IAMRole",
-        "fields": { "name": "role" },
+        "fields": {
+          "name": "role"
+        },
         "line": 5
       },
       {
@@ -34,23 +40,34 @@
     "edges": [
       {
         "type": "SESDomainRoute53Edge",
-        "fields": { "ses_g_id": "mail", "zone_g_id": "hz" },
+        "fields": {
+          "ses_g_id": "mail",
+          "zone_g_id": "hz"
+        },
         "inferred": true,
         "line": 8
       },
       {
         "type": "LambdaSESEdge",
-        "fields": { "lambda_node_g_id": "fn", "ses_node_g_id": "mail", "role_g_id": "role" },
+        "fields": {
+          "lambda_node_g_id": "fn",
+          "ses_node_g_id": "mail",
+          "role_g_id": "role"
+        },
         "inferred": true,
         "line": 9
       },
       {
         "type": "IAMRolePolicyLambdaEdge",
-        "fields": { "role_g_id": "role", "node_g_id": "fn" },
+        "fields": {
+          "role_g_id": "role",
+          "node_g_id": "fn"
+        },
         "inferred": true,
         "line": 10
       }
-    ]
+    ],
+    "guards": []
   },
   "errors": []
 }

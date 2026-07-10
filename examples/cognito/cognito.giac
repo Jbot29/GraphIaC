@@ -22,3 +22,5 @@ ui    : CognitoUserPoolClient(callback_urls: ["https://example.com/callback"],
                               logout_urls: ["https://example.com/"])
 
 users -> ui
+
+? admin-only-signup(users)   # declared invariant — verify proves it independently

@@ -4,7 +4,9 @@
       {
         "g_id": "api-role",
         "type": "IAMRole",
-        "fields": { "name": "api-role" },
+        "fields": {
+          "name": "api-role"
+        },
         "line": 2
       },
       {
@@ -21,36 +23,53 @@
       {
         "g_id": "api",
         "type": "ApiSite",
-        "fields": { "region": "us-east-2", "site_name": "api" },
+        "fields": {
+          "region": "us-east-2",
+          "site_name": "api"
+        },
         "line": 5
       },
       {
         "g_id": "hello",
         "type": "ApiEndpoint",
-        "fields": { "method": "GET", "path": "/hello", "endpoint_name": "hello" },
+        "fields": {
+          "method": "GET",
+          "path": "/hello",
+          "endpoint_name": "hello"
+        },
         "line": 6
       }
     ],
     "edges": [
       {
         "type": "IAMRolePolicyLambdaEdge",
-        "fields": { "role_g_id": "api-role", "node_g_id": "handler" },
+        "fields": {
+          "role_g_id": "api-role",
+          "node_g_id": "handler"
+        },
         "inferred": true,
         "line": 8
       },
       {
         "type": "SiteEndpointEdge",
-        "fields": { "site_node_g_id": "api", "endpoint_node_g_id": "hello" },
+        "fields": {
+          "site_node_g_id": "api",
+          "endpoint_node_g_id": "hello"
+        },
         "inferred": true,
         "line": 9
       },
       {
         "type": "EndpointLambdaEdge",
-        "fields": { "endpoint_node_g_id": "hello", "lambda_node_g_id": "handler" },
+        "fields": {
+          "endpoint_node_g_id": "hello",
+          "lambda_node_g_id": "handler"
+        },
         "inferred": true,
         "line": 10
       }
-    ]
+    ],
+    "guards": []
   },
   "errors": []
 }

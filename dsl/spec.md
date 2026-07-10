@@ -250,6 +250,42 @@ operation alongside `CREATE | UPDATE | DELETE | IMPORT`.
 
 ---
 
+## Guards — `?` declares what must stay true
+
+A **guard** is a safety invariant written next to the infrastructure it
+protects, in the same file:
+
+```
+? private(bucket)          # not publicly readable, ever
+? https-only(cf)           # forced HTTPS, modern TLS
+? locked-to(bucket, cf)    # only this distribution reads the bucket
+```
+
+The motivation is the person who *isn't* a platform engineer: the scariest
+failure mode of self-built infra is leaving something open to the
+internet. Nodes and edges provision as safely as they can — a guard proves
+it with **independent code**: predicates are implemented against raw
+boto3 in one module (`guards.py`) and are forbidden from calling the
+node/edge classes' logic. Builder and auditor share vocabulary, not
+implementation.
+
+- **Parse time**: unknown predicates, wrong arity, and wrong target types
+  are errors — the editor flags a bad guard as you type.
+- **`verify`** evaluates every guard against live AWS; failures count
+  toward the exit code (CI gating).
+- **`run`** finishes by evaluating the file's guards and printing the
+  results — deploy and get independent proof in the same breath.
+- A guard on a not-yet-created resource (e.g. BLOCKED behind a
+  certificate) reports **pending**, not failed.
+
+**Guards warn; they never block.** Locked-out-of-your-own-account is a
+failure mode too (2am, temp outage, you need the change through). A
+`--strict` mode that blocks on failing guards is a possible future flag.
+
+Predicates are a closed set, grown as examples need them (current:
+`private`, `https-only`, `locked-to`, `admin-only-signup`, `authed`).
+Signatures live in the generated registry like everything else.
+
 ## Desugar — watching the edge dissolve
 
 `desugar(graph)` re-emits any parsed source with every lens resolved:
@@ -369,12 +405,10 @@ otherwise write by hand.
   unfinished-re-run, keep applying independent operations, and summarize —
   not abort the whole run (the Pulumi failure mode). Engine semantics, not
   language surface; may make `when` permanently unnecessary.
-- **Queries / guards (`?`)** — verification in the language: Prolog-style
-  statements declaring safety invariants as facts the source must satisfy
-  (`? private(bucket)`, or a guard trailing the statement it protects).
-  Evaluated live in the sandbox, checked by `verify` against AWS, possibly
-  gating `run`. The `verify()` machinery exists; the language surface is
-  deferred until the invariant vocabulary firms up.
+- **Guard extensions** — `?` guards shipped (see *Guards*); still deferred:
+  a `--strict` flag that blocks on failing guards, type-level guards
+  (`? private(S3Bucket)` meaning every bucket), default guard packs
+  (`? baseline`), and live re-evaluation badges in the sandbox diagram.
 - **Arrow chaining** (`api -> hello -> handler`) — sugar for consecutive
   edges. Cheap, but nothing forces it yet.
 - **String interpolation** (`"${domain}-site"`) — until a script repeats

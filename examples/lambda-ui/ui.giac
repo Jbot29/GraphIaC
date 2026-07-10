@@ -33,3 +33,7 @@ mini-ui       : LambdaZipFile(runtime: "python3.13", handler: "app.handler",
 mini-ui-role  -> mini-ui           # basic execution policy
 mini-ui-users -> mini-ui-login     # app client on the pool (password auth)
 mini-ui-login -> mini-ui           # COGNITO_* env wired into the lambda
+
+# --- declared invariants: independent checks, never the provisioning code ---
+? admin-only-signup(mini-ui-users)   # nobody signs themselves up
+? authed(mini-ui)                    # public URL only with auth wired in

@@ -337,22 +337,24 @@ def parse(src, registry=None):
     def warn(ln, msg):
         warnings.append({"line": ln, "msg": msg})
 
-    graph = {"nodes": [], "edges": []}
+    graph = {"nodes": [], "edges": [], "guards": []}
 
     # ---- classify statements ----
-    const_stmts, node_stmts, edge_stmts = [], [], []
+    const_stmts, node_stmts, edge_stmts, guard_stmts = [], [], [], []
     for st in _to_statements(src):
         if st.get("unclosed"):
             err(st["ln"], "unclosed ( [ or { — statement never ends")
             continue
-        if _index_top_level(st["text"], "->") >= 0:
+        if st["text"].startswith("?"):
+            guard_stmts.append(st)
+        elif _index_top_level(st["text"], "->") >= 0:
             edge_stmts.append(st)
         elif _index_top_level(st["text"], "=") >= 0:
             const_stmts.append(st)
         elif _index_top_level(st["text"], ":") >= 0:
             node_stmts.append(st)
         else:
-            err(st["ln"], f'unrecognized statement (expected name = value, label : Type, or a -> b): "{_clip(st["text"])}"')
+            err(st["ln"], f'unrecognized statement (expected name = value, label : Type, a -> b, or ? predicate(...)): "{_clip(st["text"])}"')
 
     # a tagged value -> the plain JSON the graph carries
     def _resolve(v, ln, consts, nodes, refs_allowed):
@@ -574,6 +576,35 @@ def parse(src, registry=None):
         seen_edges.add(key)
         graph["edges"].append({"type": type_name, "fields": fields, "inferred": explicit_type is None, "line": st["ln"]})
 
+    # ---- guards: ? predicate(label, ...) ----
+    predicates = registry.get("predicates", {})
+    guard_re = re.compile(r"^\?\s*([A-Za-z_][A-Za-z0-9_-]*)\s*\(([^)]*)\)\s*$")
+    for st in guard_stmts:
+        m = guard_re.match(st["text"])
+        if not m:
+            err(st["ln"], "? needs a predicate — e.g. ? private(bucket)")
+            continue
+        name, arg_str = m.group(1), m.group(2)
+        spec = predicates.get(name)
+        if not spec:
+            err(st["ln"], f'unknown predicate "{name}"')
+            continue
+        args = [a.strip() for a in arg_str.split(",")] if arg_str.strip() else []
+        expected = spec["args"]
+        if len(args) != len(expected):
+            err(st["ln"], f'{name} takes {len(expected)} argument{"s" if len(expected) != 1 else ""} ({", ".join(expected)}), got {len(args)}')
+            continue
+        ok = True
+        for i, (label, want) in enumerate(zip(args, expected)):
+            if label not in nodes:
+                err(st["ln"], f'unknown node "{label}" in guard')
+                ok = False
+            elif nodes[label]["type"] != want:
+                err(st["ln"], f'{name} expects {want} for argument {i + 1}, got {nodes[label]["type"]} ("{label}")')
+                ok = False
+        if ok:
+            graph["guards"].append({"predicate": name, "args": args, "line": st["ln"]})
+
     return {"graph": graph, "errors": errors, "warnings": warnings}
 
 
@@ -624,6 +655,10 @@ def desugar(graph, registry=None):
         dst = e["fields"][reg["dest"]["field"]]
         extras = _fmt_fields(e["fields"], skip=(reg["source"]["field"], reg["dest"]["field"]))
         out.append(f'{src} -> {dst} : {e["type"]}' + (f"({extras})" if extras else ""))
+    if graph.get("guards"):
+        out.append("")
+    for g in graph.get("guards", []):
+        out.append(f'? {g["predicate"]}({", ".join(g["args"])})')
     return "\n".join(out)
 
 

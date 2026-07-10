@@ -50,6 +50,19 @@ def load_infra(gioc, path):
     return []
 
 
+def _evaluate_guards(session, path):
+    """The file's ? guards evaluated against live AWS ([] for .py infra)."""
+    if not path.endswith(".giac"):
+        return []
+    from GraphIaC import dsl, guards
+
+    with open(path) as f:
+        res = dsl.parse(f.read())
+    if res["errors"] or not res["graph"]["guards"]:
+        return []
+    return guards.evaluate(session, res["graph"])
+
+
 def main():
     parser = argparse.ArgumentParser(description="Infrastructure tool")
 
@@ -116,9 +129,21 @@ def main():
 
     elif args.command == "run":
         GraphIaC.run(gioc, blocked)
+        results = _evaluate_guards(gioc.session, args.infra_file)
+        if results:
+            from GraphIaC import guards
+
+            logger.plan("Guards (declared invariants — warnings only, never blocking):")
+            guards.report(results)
 
     elif args.command == "verify":
         failed = GraphIaC.verify(gioc)
+        results = _evaluate_guards(gioc.session, args.infra_file)
+        if results:
+            from GraphIaC import guards
+
+            logger.plan("Guards:")
+            failed += guards.report(results)
         raise SystemExit(1 if failed else 0)
 
     elif args.command == "diagram":

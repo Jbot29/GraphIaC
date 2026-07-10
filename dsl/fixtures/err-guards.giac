@@ -1,0 +1,8 @@
+hz     : HostedZone(domain_name: "x.co")
+bucket : S3Bucket("x-co-site")
+
+? sees(bucket)
+? private(hz)
+? private(nope)
+? locked-to(bucket)
+? private

@@ -187,9 +187,11 @@ function refresh() {
     statusEl.className = "err";
   } else {
     const refs = K.refsOf(graph).length;
+    const guards = (graph.guards || []).length;
     statusEl.textContent = graph.nodes.length + " node" + (graph.nodes.length === 1 ? "" : "s")
       + " · " + graph.edges.length + " edge" + (graph.edges.length === 1 ? "" : "s")
-      + (refs ? " · " + refs + " data dep" + (refs === 1 ? "" : "s") : "");
+      + (refs ? " · " + refs + " data dep" + (refs === 1 ? "" : "s") : "")
+      + (guards ? " · " + guards + " guard" + (guards === 1 ? "" : "s") : "");
     statusEl.className = "";
   }
   const issues = [...errors.map(e => ({ ...e, k: "e" })), ...warnings.map(w => ({ ...w, k: "w" }))]
@@ -461,6 +463,13 @@ function opLine(o) {
   const reason = o.reason ? `  — ${esc(o.reason)}` : "";
   return `<span class="op-${o.op}">${OP_SYM[o.op] || "·"} ${esc(o.type)} [${esc(o.label)}]${reason}</span>`;
 }
+function guardLines(results) {
+  const sym = { pass: ["✓", "ok"], fail: ["✗", "fail"], pending: ["…", "op-blocked"] };
+  return (results || []).map((g) => {
+    const [s, cls] = sym[g.status];
+    return `<span class="${cls}">${s} ? ${esc(g.predicate)}(${esc(g.args.join(", "))})${g.message ? ": " + esc(g.message) : ""}</span>`;
+  });
+}
 
 async function engine(path, waitMsg) {
   logLines([waitMsg + "…"]);
@@ -478,8 +487,10 @@ async function engine(path, waitMsg) {
     OPS.clear();
     for (const o of ops) OPS.set(o.label, o.op);
     drawGraph(current.graph);
-    logLines(ops.length ? ops.map(opLine)
-      : [`<span class="ok">✓ no changes — infrastructure is up to date</span>`]);
+    const lines = ops.length ? ops.map(opLine)
+      : [`<span class="ok">✓ no changes — infrastructure is up to date</span>`];
+    if ((data.guards || []).length) lines.push("", ...guardLines(data.guards));
+    logLines(lines);
   } catch (e) {
     logLines([`<span class="fail">✗ ${esc(String(e))}</span>`]);
   }
@@ -503,7 +514,8 @@ document.getElementById("verifyBtn").addEventListener("click", async () => {
     }
     const lines = data.checks.map(c =>
       `<span class="${c.passed ? "ok" : "fail"}">${c.passed ? "✓" : "✗"} ${esc(c.label)} — ${esc(c.name)}${c.message ? ": " + esc(c.message) : ""}</span>`);
-    lines.push(data.failed
+    if ((data.guards || []).length) lines.push("", ...guardLines(data.guards));
+    lines.push("", data.failed
       ? `<span class="fail">${data.failed} check${data.failed === 1 ? "" : "s"} failed</span>`
       : `<span class="ok">all checks passed</span>`);
     logLines(lines);

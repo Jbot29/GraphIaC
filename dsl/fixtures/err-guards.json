@@ -1,0 +1,9 @@
+{
+  "errors": [
+    { "line": 4, "includes": "unknown predicate \"sees\"" },
+    { "line": 5, "includes": "private expects S3Bucket for argument 1, got HostedZone (\"hz\")" },
+    { "line": 6, "includes": "unknown node \"nope\" in guard" },
+    { "line": 7, "includes": "locked-to takes 2 arguments (S3Bucket, CloudFrontDistribution), got 1" },
+    { "line": 8, "includes": "? needs a predicate" }
+  ]
+}
