@@ -241,13 +241,14 @@ def lambda_create(
 
 def ensure_function_url(session, function_name, region):
     """A public function URL (AuthType NONE) + the invoke permission that
-    makes it reachable. Idempotent."""
+    makes it reachable. Idempotent.
+
+    Permission FIRST, then the URL config: the URL's auth layer can cache
+    its policy evaluation from creation time, and a URL created before its
+    invoke grant exists has been seen to stay 403 Forbidden even after the
+    grant lands.
+    """
     lc = session.client("lambda", region_name=region)
-    try:
-        resp = lc.get_function_url_config(FunctionName=function_name)
-    except lc.exceptions.ResourceNotFoundException:
-        resp = lc.create_function_url_config(FunctionName=function_name, AuthType="NONE")
-        logger.info(f"Created function URL for {function_name}: {resp['FunctionUrl']}")
     try:
         lc.add_permission(
             FunctionName=function_name,
@@ -259,6 +260,11 @@ def ensure_function_url(session, function_name, region):
     except ClientError as e:
         if e.response["Error"]["Code"] != "ResourceConflictException":  # already granted
             raise
+    try:
+        resp = lc.get_function_url_config(FunctionName=function_name)
+    except lc.exceptions.ResourceNotFoundException:
+        resp = lc.create_function_url_config(FunctionName=function_name, AuthType="NONE")
+        logger.info(f"Created function URL for {function_name}: {resp['FunctionUrl']}")
     return resp["FunctionUrl"]
 
 
