@@ -111,13 +111,10 @@ def main():
         # the editor UI owns the source from here — nothing is pre-loaded
         from GraphIaC.server import serve
 
-        if args.state:
-            print("serve doesn't support --state yet — run it against a local .db")
-            raise SystemExit(1)
         if not args.infra_file.endswith(".giac"):
             print("serve works with .giac infra files")
             return
-        serve(session, args.infra_file, port=args.port)
+        serve(session, args.infra_file, port=args.port, state_url=args.state)
         return
 
     base = os.path.splitext(args.infra_file)[0]

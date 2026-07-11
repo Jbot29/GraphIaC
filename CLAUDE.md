@@ -152,7 +152,7 @@ Shared `colorlog` setup. Call `setup_logger()` in new modules rather than callin
 
 ### S3-Backed State (`src/GraphIaC/state.py`)
 
-`--state s3://bucket[/prefix]` keeps the SQLite DB in S3 instead of next to the infra file. Lock protocol: a lockfile made atomic by S3 conditional writes (`If-None-Match:*` to acquire — the Terraform 1.10+ approach, no DynamoDB), ETag `If-Match` CAS on publish. Only `run` locks; `plan`/`verify` fetch lock-free. Locks are never auto-stolen — a held lock reports holder/time/op and the `unlock` command is the explicit override. After a partial run the DB is still published (recording what was created beats orphaning it). See `examples/team-state/`.
+`--state s3://bucket[/prefix]` keeps the SQLite DB in S3 instead of next to the infra file. Lock protocol: a lockfile made atomic by S3 conditional writes (`If-None-Match:*` to acquire — the Terraform 1.10+ approach, no DynamoDB), ETag `If-Match` CAS on publish. Only `run` locks; `plan`/`verify` fetch lock-free. `serve --state s3://…` works too: each API request fetches fresh, run takes the S3 lock (HTTP 423 + holder info when held) and publishes back. Locks are never auto-stolen — a held lock reports holder/time/op and the `unlock` command is the explicit override. After a partial run the DB is still published (recording what was created beats orphaning it). See `examples/team-state/`.
 
 ### Guards (`src/GraphIaC/guards.py`)
 

@@ -98,3 +98,63 @@ def test_busy_lock_returns_409(api):
         assert status == 409
     finally:
         api.lock.release()
+
+
+# ---------------------------------------------------------------------
+# serve with --state: the control panel against S3-backed state
+# ---------------------------------------------------------------------
+@pytest.fixture
+def s3_api(monkeypatch, tmp_path):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    infra = tmp_path / "demo.giac"
+    infra.write_text(SRC)
+    with mock_aws():
+        session = boto3.session.Session(region_name="us-east-1")
+        session.client("s3").create_bucket(Bucket="ui-state")
+        yield Api(session, str(infra), state_url="s3://ui-state/team")
+
+
+def test_s3_api_source_reports_state_url(s3_api):
+    status, data = s3_api.get_source()
+    assert status == 200
+    assert data["state"] == "s3://ui-state/team"
+
+
+def test_s3_api_run_publishes_and_plan_reads_back(s3_api, tmp_path):
+    status, data = s3_api.post_run({"source": SRC})
+    assert status == 200
+    assert data["applied"][0]["op"] == "create"
+
+    # the state landed in S3, not next to the infra file
+    s3_api.session.client("s3").head_object(Bucket="ui-state", Key="team/demo.db")
+    assert not (tmp_path / "demo.db").exists()
+
+    # a completely fresh Api (new machine) sees converged state
+    fresh = Api(s3_api.session, s3_api.infra_path, state_url="s3://ui-state/team")
+    status, data = fresh.post_plan({"source": SRC})
+    assert status == 200
+    assert data["ops"] == []
+
+    # and the lock is gone after the run
+    from GraphIaC.state import S3State
+
+    S3State(s3_api.session, "s3://ui-state/team", "demo.db").acquire("check")
+
+
+def test_s3_api_run_locked_returns_423(s3_api):
+    from GraphIaC.state import S3State
+
+    other = S3State(s3_api.session, "s3://ui-state/team", "demo.db")
+    other.acquire(operation="run")  # someone else's run in flight
+
+    status, data = s3_api.post_run({"source": SRC})
+    assert status == 423
+    assert "locked" in data["error"].lower()
+    assert "unlock" in data["error"]
+
+    # reads are unaffected by the S3 lock
+    status, data = s3_api.post_plan({"source": SRC})
+    assert status == 200
+    other.release()

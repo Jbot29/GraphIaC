@@ -454,6 +454,10 @@ async function api(path, body) {
     if (status !== 200) return;
     if (data.source && data.source.trim()) editor.value = data.source;
     serverBar.hidden = false;
+    if (data.state) {
+      const hint = document.querySelector(".panel-label .hint");
+      if (hint) hint.textContent = "state: " + data.state + " (runs lock)";
+    }
     refresh();
   } catch (e) { /* file:// — sandbox only, no controls */ }
 })();
@@ -480,7 +484,8 @@ async function engine(path, waitMsg) {
       return;
     }
     if (data.error) {
-      logLines([`<span class="${status === 409 ? "op-update" : "fail"}">✗ ${esc(data.error)}</span>`]);
+      const cls = status === 409 || status === 423 ? "op-update" : "fail";  // busy/locked = wait, not broken
+      logLines([`<span class="${cls}">${status === 423 ? "🔒" : "✗"} ${esc(data.error)}</span>`]);
       return;
     }
     const ops = data.ops || data.applied || [];
