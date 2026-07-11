@@ -141,3 +141,23 @@ def test_stale_policy_triggers_update_and_resync(aws, tmp_path):
     GraphIaC.run(load_setup(aws, conn))
     checks = DeployRole(g_id="d", name="graphiac-deploy").verify(aws, None)
     assert all(c.passed for c in checks)
+
+
+def test_every_sid_in_the_codebase_is_alphanumeric():
+    """Real IAM rejects punctuation in statement Sids; moto doesn't validate
+    them at all — so a bad Sid only fails in the field (learned live:
+    'GraphIaCTrust:lambda'). Pin the rule statically."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).parent.parent / "src" / "GraphIaC"
+    offenders = []
+    for path in src.rglob("*.py"):
+        for sid in re.findall(r'Sid="([^"]+)"', path.read_text()):
+            if not sid.isalnum():
+                offenders.append((path.name, sid))
+    assert not offenders, f"non-alphanumeric Sids (real AWS rejects): {offenders}"
+
+    # the generated deploy-policy Sids too
+    for stmt in deploy_policy.policy_for_all()["Statement"]:
+        assert stmt["Sid"].isalnum(), stmt["Sid"]

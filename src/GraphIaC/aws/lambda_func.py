@@ -43,8 +43,10 @@ assume_role_policy_document = {
     ],
 }
 
+# NB: IAM statement Sids must be strictly alphanumeric — real AWS rejects
+# punctuation (moto doesn't validate this)
 stmt = IamTrustPolicyStatement(
-    Sid="GraphIaCTrust:lambda",
+    Sid="GraphIaCTrustLambda",
     Effect="Allow",
     Principal={"Service": "lambda.amazonaws.com"},
     Action="sts:AssumeRole",
@@ -150,14 +152,11 @@ class LambdaZipFile(BaseNode):
         # The role must trust Lambda BEFORE create_function — and the edge
         # that owns that trust runs after nodes. An imported role (e.g.
         # graphiac-deploy, which starts with account-root trust only) would
-        # otherwise fail "cannot be assumed" forever. Assert it here; the
-        # edge's own upsert then finds it already in place.
-        try:
-            if not _lambda_trusted(get_trust_policy_for_role(session, iam_role.read_id)):
-                upsert_trust_statement_for_role(session, iam_role.read_id, stmt)
-                logger.info(f"Added Lambda trust to role {iam_role.read_id}")
-        except ClientError as e:
-            logger.error(f"Could not check trust policy on {iam_role.read_id}: {e}")
+        # otherwise fail "cannot be assumed" forever. Assert it here — and
+        # let failures surface: without trust, create can only fail anyway.
+        if not _lambda_trusted(get_trust_policy_for_role(session, iam_role.read_id)):
+            upsert_trust_statement_for_role(session, iam_role.read_id, stmt)
+            logger.info(f"Added Lambda trust to role {iam_role.read_id}")
 
         result = lambda_create(
             session,
