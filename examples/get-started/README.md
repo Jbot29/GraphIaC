@@ -73,10 +73,20 @@ file needs — the graph knows its own permissions:
 python -m GraphIaC graphiac --infra_file site.giac policy
 ```
 
-## Auditing
+## Upgrading GraphIaC? Re-run setup
 
-`verify` on the setup file checks the role still covers everything
-registered (e.g. after an upgrade adds a service):
+New versions add node types and AWS actions — your **live role doesn't
+know until you re-sync it**. The symptom is an `AccessDenied` from the
+`graphiac-deploy` role on something that should obviously work. The fix
+is always the same:
+
+```bash
+python -m GraphIaC bootstrap --infra_file setup.giac run
+```
+
+`plan` shows the drift first if you want to see it (`~ DeployRole …
+will be updated`, naming the missing actions), and `verify` audits it
+any time:
 
 ```bash
 python -m GraphIaC bootstrap --infra_file setup.giac verify

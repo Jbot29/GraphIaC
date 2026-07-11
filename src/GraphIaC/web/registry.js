@@ -640,6 +640,10 @@ return {
         "region": {
           "default": null,
           "required": false
+        },
+        "versioning": {
+          "default": null,
+          "required": false
         }
       },
       "nameField": "bucket_name"

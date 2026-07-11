@@ -24,3 +24,4 @@ python -m GraphIaC <aws-profile> --infra_file <file>.giac serve
 | [`static-site/`](static-site/) | A real website: `https://your-domain` → CloudFront → private S3, DNS-validated cert, pretty URLs via a CloudFront function. Includes a starter `index.html` to publish. |
 | [`lambda-ui/`](lambda-ui/) | A serverless web app with login: one Lambda with a public URL, Cognito auth, static assets baked into the zip, and authenticated JSON APIs — add a Python function, get an endpoint. The base for internal tools (feature-flag consoles, admin panels, CRM helpers). |
 | [`cognito/`](cognito/) | Auth for a self-hosted UI: a locked-down Cognito user pool (admin-only signup, deletion protection) + an OAuth app client. `verify` audits the security posture. |
+| [`team-state/`](team-state/) | Shared state: a versioned, private S3 bucket holding your `.db`s, used via `--state s3://…`. Locked runs (S3 conditional writes — no DynamoDB), lock-free plans, explicit `unlock`. |

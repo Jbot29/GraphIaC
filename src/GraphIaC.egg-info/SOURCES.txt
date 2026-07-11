@@ -7,12 +7,14 @@ src/GraphIaC/db.py
 src/GraphIaC/deploy_policy.py
 src/GraphIaC/dsl.py
 src/GraphIaC/dsl_registry.py
+src/GraphIaC/guards.py
 src/GraphIaC/logs.py
 src/GraphIaC/main.py
 src/GraphIaC/model_map.py
 src/GraphIaC/models.py
 src/GraphIaC/server.py
 src/GraphIaC/setup.py
+src/GraphIaC/state.py
 src/GraphIaC.egg-info/PKG-INFO
 src/GraphIaC.egg-info/SOURCES.txt
 src/GraphIaC.egg-info/dependency_links.txt
@@ -59,5 +61,7 @@ tests/test_deploy_policy.py
 tests/test_dsl.py
 tests/test_dsl_load.py
 tests/test_edge_reads.py
+tests/test_guards.py
 tests/test_lambda_ui.py
 tests/test_server.py
+tests/test_state.py

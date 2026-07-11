@@ -150,6 +150,10 @@ Run the DSL tests: `pytest tests/test_dsl.py tests/test_dsl_load.py` and `node -
 
 Shared `colorlog` setup. Call `setup_logger()` in new modules rather than calling `logging` directly.
 
+### S3-Backed State (`src/GraphIaC/state.py`)
+
+`--state s3://bucket[/prefix]` keeps the SQLite DB in S3 instead of next to the infra file. Lock protocol: a lockfile made atomic by S3 conditional writes (`If-None-Match:*` to acquire — the Terraform 1.10+ approach, no DynamoDB), ETag `If-Match` CAS on publish. Only `run` locks; `plan`/`verify` fetch lock-free. `serve --state s3://…` works too: each API request fetches fresh, run takes the S3 lock (HTTP 423 + holder info when held) and publishes back. Locks are never auto-stolen — a held lock reports holder/time/op and the `unlock` command is the explicit override. After a partial run the DB is still published (recording what was created beats orphaning it). See `examples/team-state/`.
+
 ### Guards (`src/GraphIaC/guards.py`)
 
 `? predicate(label, ...)` statements in `.giac` files declare safety invariants (`? private(bucket)`). **Independence rule: predicates are raw boto3 only — never call node/edge class code.** Signatures in `PREDICATES` flow into the generated registry so both parsers validate at parse time. `verify` counts guard failures (exit 1); `run` reports them after applying but never blocks (warn-only by design; `--strict` is future). Pass/fail/pending states — pending = target not created yet. New predicates: add to `PREDICATES` + `_CHECKS`, regenerate the registry, cover pass/fail/pending in `tests/test_guards.py`.
