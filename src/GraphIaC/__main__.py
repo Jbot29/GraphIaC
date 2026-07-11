@@ -71,10 +71,13 @@ def main():
     parser.add_argument("--port", type=int, default=8642, help="Port for the serve command")
     parser.add_argument("--all", action="store_true",
                         help="policy: cover every registered type, not just the infra file's")
+    parser.add_argument("--state",
+                        help="Keep state in S3 instead of a local .db: s3://bucket[/prefix]. "
+                             "run locks (conditional writes); plan/verify read lock-free")
     parser.add_argument(
         "command",
-        choices=["plan", "run", "diagram", "verify", "serve", "policy"],
-        help="The command to run (e.g., plan, run, verify, serve, policy)",
+        choices=["plan", "run", "diagram", "verify", "serve", "policy", "unlock"],
+        help="The command to run (e.g., plan, run, verify, serve, policy, unlock)",
     )
 
     args = parser.parse_args()
@@ -108,6 +111,9 @@ def main():
         # the editor UI owns the source from here — nothing is pre-loaded
         from GraphIaC.server import serve
 
+        if args.state:
+            print("serve doesn't support --state yet — run it against a local .db")
+            raise SystemExit(1)
         if not args.infra_file.endswith(".giac"):
             print("serve works with .giac infra files")
             return
@@ -115,11 +121,42 @@ def main():
         return
 
     base = os.path.splitext(args.infra_file)[0]
-    db_conn = sqlite3.connect(base + ".db")
+
+    backend = None
+    if args.state:
+        from GraphIaC.state import LockHeld, S3State
+
+        backend = S3State(session, args.state, os.path.basename(base) + ".db")
+
+    if args.command == "unlock":
+        if not backend:
+            print("unlock needs --state s3://bucket[/prefix]")
+            raise SystemExit(1)
+        backend.force_unlock()
+        return
+
+    if backend:
+        if args.command == "run":
+            try:
+                backend.acquire(operation="run")
+            except LockHeld as e:
+                logger.error(str(e))
+                raise SystemExit(1) from None
+        db_conn = sqlite3.connect(backend.fetch())
+    else:
+        db_conn = sqlite3.connect(base + ".db")
 
     gioc = GraphIaC.init(session, db_conn)
     blocked = load_infra(gioc, args.infra_file)
 
+    try:
+        _dispatch(args, gioc, blocked, backend, session, base, db_conn)
+    finally:
+        if backend:
+            backend.cleanup()  # idempotent; run's own publish/release ran already
+
+
+def _dispatch(args, gioc, blocked, backend, session, base, db_conn):
     if args.command == "plan":
         logger.plan("Plan")
         changes = GraphIaC.plan(gioc, blocked)
@@ -128,8 +165,19 @@ def main():
             logger.info(f"\tChange: {change.operation} {change.obj}")
 
     elif args.command == "run":
-        GraphIaC.run(gioc, blocked)
-        results = _evaluate_guards(gioc.session, args.infra_file)
+        try:
+            GraphIaC.run(gioc, blocked)
+        finally:
+            if backend:
+                # publish even after a partial run — recording what WAS
+                # created beats orphaning it; then always release
+                db_conn.close()
+                try:
+                    backend.publish()
+                finally:
+                    backend.release()
+                    backend.cleanup()
+        results = _evaluate_guards(session, args.infra_file)
         if results:
             from GraphIaC import guards
 

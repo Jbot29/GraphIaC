@@ -1,0 +1,27 @@
+# Team state: your infrastructure's .db lives in S3 — same state from
+# every machine (and every teammate), with locking. No DynamoDB: S3's
+# conditional writes make a plain lockfile atomic (the same protocol
+# Terraform 1.10+ uses).
+#
+# One-time (bucket names are globally unique — change the label):
+#
+#   python -m GraphIaC graphiac --infra_file state-bucket.giac run
+#
+# Then point any infra file at it:
+#
+#   python -m GraphIaC graphiac --infra_file site.giac \
+#       --state s3://my-graphiac-state/prod run
+#
+# `run` takes the lock; a second runner gets told who holds it and since
+# when. plan/verify read the latest state lock-free. A crashed run's
+# lock is never stolen automatically — release it deliberately:
+#
+#   python -m GraphIaC graphiac --infra_file site.giac \
+#       --state s3://my-graphiac-state/prod unlock
+#
+# (This file's own state stays local — the turtle at the bottom. Keep
+# state-bucket.db next to this file, or in your repo.)
+
+my-graphiac-state : S3Bucket(region: "us-east-2", versioning: true)
+
+? private(my-graphiac-state)   # your infra's history is nobody's business

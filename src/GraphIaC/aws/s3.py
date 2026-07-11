@@ -22,10 +22,16 @@ class S3Bucket(BaseNode):
         "s3:GetBucketPolicy",
         "s3:DeleteObject",
         "s3:DeleteObjectVersion",
+        "s3:PutBucketVersioning",
+        "s3:GetBucketVersioning",
+        "s3:GetObject",  # state backend + content publishing
+        "s3:PutObject",
     ]
 
     bucket_name: str
     region: Optional[str] = None
+    # None = unmanaged (leave whatever is set); True/False = assert it
+    versioning: Optional[bool] = None
 
     @property
     def read_id(self) -> Optional[str]:
@@ -38,7 +44,9 @@ class S3Bucket(BaseNode):
             s3.head_bucket(Bucket=read_id)
             loc = s3.get_bucket_location(Bucket=read_id)
             region = loc["LocationConstraint"] or "us-east-1"
-            return cls(g_id=g_id, bucket_name=read_id, region=region)
+            status = s3.get_bucket_versioning(Bucket=read_id).get("Status")
+            return cls(g_id=g_id, bucket_name=read_id, region=region,
+                       versioning=status == "Enabled")
         except ClientError as e:
             if e.response["Error"]["Code"] in ("404", "NoSuchBucket"):
                 return None
@@ -63,13 +71,22 @@ class S3Bucket(BaseNode):
                     "RestrictPublicBuckets": True,
                 },
             )
+            if self.versioning is not None:
+                self._set_versioning(s3)
             logger.info(f"Created private S3 bucket: {self.bucket_name}")
         except ClientError as e:
             logger.error(f"Failed to create S3 bucket {self.bucket_name}: {e}")
             raise
 
+    def _set_versioning(self, s3):
+        s3.put_bucket_versioning(
+            Bucket=self.bucket_name,
+            VersioningConfiguration={"Status": "Enabled" if self.versioning else "Suspended"},
+        )
+
     def update(self, session, G, diff=None):
-        pass
+        if self.versioning is not None:
+            self._set_versioning(session.client("s3"))
 
     def verify(self, session, G) -> list:
         s3 = session.client("s3")
