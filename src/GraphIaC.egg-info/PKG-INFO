@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: GraphIaC
-Version: 0.0.25
+Version: 0.0.27
 Summary: GraphIaC
 Author-email: Jeremy Schwartz <jerschwartz@gmail.com>
 Project-URL: Homepage, https://github.com/Jbot29/GraphIaC
@@ -49,6 +49,8 @@ Because AWS permission patterns are stable, that knowledge gets written once int
 ```bash
 pip install --upgrade GraphIaC
 ```
+
+Using the `graphiac-deploy` role from [`examples/get-started/`](examples/get-started/)? **After upgrading, re-run its setup** — new versions add AWS actions the live role doesn't know until re-synced (the symptom is a surprising `AccessDenied`).
 
 **2. Have an AWS profile ready.** GraphIaC uses your local AWS credentials (`~/.aws/credentials`), selected by profile name. The profile needs permissions for whatever you plan to manage (for early testing, an admin-ish sandbox account is the practical choice).
 
