@@ -172,6 +172,13 @@ A bare node label used as a value (like `role` above) resolves to that node's
 This table is not hand-maintained in two places — it is generated from the
 registry (below).
 
+**Subclass nodes ride their parent's edges (and guards).** A registered
+node type may subclass another (`DeployRole` isa `IAMRole`; a future
+`S3BucketKMS` isa `S3Bucket`); the registry records the chain, and both
+parsers match edge endpoints and guard targets through it. So
+`graphiac-deploy -> fn` infers `IAMRolePolicyLambdaEdge` even though
+`graphiac-deploy` is a `DeployRole` — specialized node types stay cheap.
+
 ### Gating edges (⊘)
 
 Some relationships are also *prerequisites*: a CloudFront distribution

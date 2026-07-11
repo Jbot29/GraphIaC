@@ -1,6 +1,6 @@
 import os
 import time
-from typing import ClassVar, Optional
+from typing import ClassVar, Dict, Optional
 
 from botocore.exceptions import ClientError
 from pydantic import Field
@@ -43,8 +43,10 @@ assume_role_policy_document = {
     ],
 }
 
+# NB: IAM statement Sids must be strictly alphanumeric — real AWS rejects
+# punctuation (moto doesn't validate this)
 stmt = IamTrustPolicyStatement(
-    Sid="GraphIaCTrust:lambda",
+    Sid="GraphIaCTrustLambda",
     Effect="Allow",
     Principal={"Service": "lambda.amazonaws.com"},
     Action="sts:AssumeRole",
@@ -122,6 +124,9 @@ class LambdaZipFile(BaseNode):
     # CognitoLambdaAuthEdge). False leaves any existing URL alone.
     public_url: bool = False
     url: Optional[str] = None
+    # environment variables asserted on the function (merged — edges like
+    # CognitoLambdaAuthEdge add theirs alongside, nothing clobbers)
+    env: Dict[str, str] = {}
 
     @property
     def read_id(self) -> Optional[str]:
@@ -144,6 +149,15 @@ class LambdaZipFile(BaseNode):
 
         iam_role = G.nodes[role_edge.role_g_id]["data"]
 
+        # The role must trust Lambda BEFORE create_function — and the edge
+        # that owns that trust runs after nodes. An imported role (e.g.
+        # graphiac-deploy, which starts with account-root trust only) would
+        # otherwise fail "cannot be assumed" forever. Assert it here — and
+        # let failures surface: without trust, create can only fail anyway.
+        if not _lambda_trusted(get_trust_policy_for_role(session, iam_role.read_id)):
+            upsert_trust_statement_for_role(session, iam_role.read_id, stmt)
+            logger.info(f"Added Lambda trust to role {iam_role.read_id}")
+
         result = lambda_create(
             session,
             self.name,
@@ -156,6 +170,7 @@ class LambdaZipFile(BaseNode):
             self.publish,
             self.zip_file_path,
             self.region,
+            env=self.env,
         )
         if self.public_url:
             self.url = ensure_function_url(session, self.name, self.region)
@@ -179,6 +194,7 @@ class LambdaZipFile(BaseNode):
             publish=self.publish,  # AWS doesn't store this boolean
             public_url=self.public_url,  # managed only when True (no drift signal)
             url=read_function_url(session, self.name, self.region),
+            env=self.env,  # asserted by merge in update; echoed here
         )
 
         return current_config
@@ -222,6 +238,7 @@ def lambda_create(
     publish,
     zip_file_name,
     region,
+    env=None,
 ):
     lambda_client = session.client("lambda", region_name=region)
     # Read zip file bytes
@@ -233,6 +250,10 @@ def lambda_create(
     # A just-created IAM role can take tens of seconds to propagate to the
     # Lambda service — get_role succeeding does NOT mean Lambda can assume
     # it yet. Retry the specific "cannot be assumed" rejection.
+    params = {}
+    if env:
+        params["Environment"] = {"Variables": dict(env)}
+
     deadline = time.time() + 90
     while True:
         try:
@@ -246,6 +267,7 @@ def lambda_create(
                 Timeout=timeout,
                 MemorySize=memory_size,
                 Publish=publish,
+                **params,
             )
             return
         except ClientError as e:
@@ -328,7 +350,7 @@ def lambda_read(session, func_name, region):
 
 
 def lambda_update(session, lambda_config, region_name):
-    print(f"UPDATE THE LAMBDA: {region_name}")
+    logger.debug(f"lambda_update: {region_name}")
     lambda_client = session.client("lambda", region_name=region_name)
 
     function_name = lambda_config.name
@@ -346,7 +368,7 @@ def lambda_update(session, lambda_config, region_name):
         result["error"] = f"Unexpected error accessing Lambda: {e}"
         return result
 
-    print(current)
+    logger.debug(f"current config: {current}")
     # 2. Compare AWS config to local config. We'll build an update dict dynamically.
     config_updates = {}
 
@@ -365,26 +387,33 @@ def lambda_update(session, lambda_config, region_name):
     if current.get("MemorySize") != lambda_config.memory_size:
         config_updates["MemorySize"] = lambda_config.memory_size
 
-    """
-    # 3. Update function configuration if needed
+    # env is asserted by MERGE: our declared vars win, everything else
+    # (e.g. CognitoLambdaAuthEdge's COGNITO_*) is preserved
+    if lambda_config.env:
+        live_env = current.get("Environment", {}).get("Variables", {})
+        merged = {**live_env, **lambda_config.env}
+        if merged != live_env:
+            config_updates["Environment"] = {"Variables": merged}
+
+    # 3. Update function configuration if needed (then wait — a config
+    #    update in flight makes the code update below conflict)
     if config_updates:
         try:
-            lambda_client.update_function_configuration(
-                FunctionName=function_name,
-                **config_updates
+            lambda_client.update_function_configuration(FunctionName=function_name, **config_updates)
+            lambda_client.get_waiter("function_updated_v2").wait(
+                FunctionName=function_name, WaiterConfig={"Delay": 2, "MaxAttempts": 30}
             )
+            logger.info(f"Updated {function_name} config: {', '.join(config_updates)}")
             result["updated_config"] = True
         except ClientError as e:
             result["error"] = f"Failed to update Lambda config: {e}"
             return result
-    """
-    # 4. Re-upload code if the zip is different or if you always want to re-deploy code
-    #    (Here, we'll always re-upload to ensure code is in sync with local zip).
+
+    # 4. Re-upload code (always — keeps code in sync with the local zip)
     zip_path = lambda_config.zip_file_path
     if not os.path.isfile(zip_path):
         result["error"] = f"Zip file does not exist: {zip_path}"
         return result
-    print(f"RE UPLOAD: {zip_path}")
 
     with open(zip_path, "rb") as f:
         zip_bytes = f.read()
@@ -393,16 +422,10 @@ def lambda_update(session, lambda_config, region_name):
         result["error"] = f"Zip file is empty: {zip_path}"
         return result
 
-    print(f"UPDATE FUNCTION CODE: {function_name}")
-    response = lambda_client.update_function_code(
+    logger.info(f"Updating {function_name} code ({len(zip_bytes)} bytes)")
+    lambda_client.update_function_code(
         FunctionName=function_name, ZipFile=zip_bytes, Publish=lambda_config.publish
     )
-    # response = lambda_client.get_waiter("function_updated").wait(FunctionName=function_name)
-
-    print("RESPONSE:", response)
     result["updated_code"] = True
-
-    #    except ClientError as e:
-    #        result["error"] = f"Failed to update Lambda code: {e}"
 
     return result

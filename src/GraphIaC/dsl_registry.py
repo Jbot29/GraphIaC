@@ -102,11 +102,16 @@ def _field_info(model_cls):
 
 
 def build_registry():
+    by_class = {cls: name for name, cls in BASE_MODEL_MAP.items()}
     nodes, edges = {}, {}
     for type_name, cls in sorted(BASE_MODEL_MAP.items()):
         if issubclass(cls, BaseNode):
+            # nearest registered ancestor — lets a subclass node (DeployRole,
+            # future S3BucketKMS) inherit its parent's edges and guards
+            isa = next((by_class[c] for c in cls.__mro__[1:] if c in by_class), None)
             nodes[type_name] = {
                 "nameField": NAME_FIELDS.get(type_name),
+                "isa": isa,
                 "fields": _field_info(cls),
             }
         elif issubclass(cls, BaseEdge):

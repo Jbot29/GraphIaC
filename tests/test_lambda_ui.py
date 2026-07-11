@@ -263,3 +263,40 @@ def test_create_function_retries_role_propagation(aws, zip_path, monkeypatch):
                               "d", 15, 128, True, zip_path, REGION)
     assert session.flaky.failures == 0  # both flakes consumed, then success
     assert aws.client("lambda", region_name=REGION).get_function(FunctionName="prop-fn")
+
+
+def test_create_asserts_lambda_trust_on_imported_role(aws, zip_path, tmp_path):
+    """A pre-existing role that only trusts the account (graphiac-deploy's
+    shape) must gain Lambda trust BEFORE create_function — the edge that
+    owns trust runs after nodes, too late."""
+    import json
+
+    import networkx as nx
+
+    from GraphIaC.aws.iam_role import IAMRole
+
+    iam = aws.client("iam")
+    root_only = {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Allow", "Principal": {"AWS": "arn:aws:iam::123456789012:root"},
+                       "Action": "sts:AssumeRole"}],
+    }
+    arn = iam.create_role(RoleName="root-trust-role",
+                          AssumeRolePolicyDocument=json.dumps(root_only))["Role"]["Arn"]
+
+    G = nx.DiGraph()
+    role = IAMRole(g_id="role", name="root-trust-role", arn=arn)
+    fn = LambdaZipFile(g_id="fn", name="trust-fn", runtime="python3.13",
+                       handler="app.handler", zip_file_path=zip_path, region=REGION)
+    G.add_node("role", data=role)
+    G.add_node("fn", data=fn)
+    G.add_edge("role", "fn", data=IAMRolePolicyLambdaEdge(role_g_id="role", node_g_id="fn"))
+
+    fn.create(aws, G)  # node create, edge NOT yet applied — the real run order
+
+    doc = iam.get_role(RoleName="root-trust-role")["Role"]["AssumeRolePolicyDocument"]
+    if isinstance(doc, str):
+        doc = json.loads(doc)
+    services = [s.get("Principal", {}).get("Service") for s in doc["Statement"]]
+    assert "lambda.amazonaws.com" in services
+    aws.client("lambda", region_name=REGION).get_function(FunctionName="trust-fn")

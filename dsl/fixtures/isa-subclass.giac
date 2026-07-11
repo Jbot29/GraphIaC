@@ -1,0 +1,5 @@
+# a subclass node (DeployRole isa IAMRole) rides its parent's edges
+deploy : DeployRole
+fn     : LambdaZipFile(runtime: "python3.13", handler: "h.h", zip_file_path: "d.zip")
+
+deploy -> fn

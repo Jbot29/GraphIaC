@@ -1,0 +1,33 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "deploy",
+        "type": "DeployRole",
+        "fields": { "name": "deploy" },
+        "line": 2
+      },
+      {
+        "g_id": "fn",
+        "type": "LambdaZipFile",
+        "fields": {
+          "runtime": "python3.13",
+          "handler": "h.h",
+          "zip_file_path": "d.zip",
+          "name": "fn"
+        },
+        "line": 3
+      }
+    ],
+    "edges": [
+      {
+        "type": "IAMRolePolicyLambdaEdge",
+        "fields": { "role_g_id": "deploy", "node_g_id": "fn" },
+        "inferred": true,
+        "line": 5
+      }
+    ],
+    "guards": []
+  },
+  "errors": []
+}

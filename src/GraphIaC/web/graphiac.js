@@ -358,6 +358,17 @@ function parse(src, registry) {
     graph.nodes.push({ g_id: node.g_id, type: node.type, fields: node.fields, line: node.line });
   }
 
+  // a subclass node matches its ancestors' edge endpoints and guard
+  // targets (registry "isa" chain — DeployRole rides IAMRole's edges,
+  // S3BucketKMS will ride S3Bucket's)
+  function isA(actual, want) {
+    while (actual != null) {
+      if (actual === want) return true;
+      actual = (registry.nodes[actual] || {}).isa;
+    }
+    return false;
+  }
+
   // ---- edges ----
   const seenEdges = new Set();
   for (const st of edgeStmts) {
@@ -394,15 +405,15 @@ function parse(src, registry) {
     if (explicitType) {
       const reg = registry.edges[explicitType];
       if (!reg) { err(st.ln, `unknown edge type "${explicitType}"`); continue; }
-      if (reg.source.type === ta && reg.dest.type === tb) { /* as written */ }
-      else if (reg.source.type === tb && reg.dest.type === ta) { srcLabel = bLabel; dstLabel = aLabel; }
+      if (isA(ta, reg.source.type) && isA(tb, reg.dest.type)) { /* as written */ }
+      else if (isA(tb, reg.source.type) && isA(ta, reg.dest.type)) { srcLabel = bLabel; dstLabel = aLabel; }
       else { err(st.ln, `${explicitType} connects ${reg.source.type} -> ${reg.dest.type}, not ${ta} -> ${tb}`); continue; }
       type = explicitType;
     } else {
       const matches = [];
       for (const [name, reg] of Object.entries(registry.edges)) {
-        if (reg.source.type === ta && reg.dest.type === tb) matches.push({ name, flip: false });
-        else if (reg.source.type === tb && reg.dest.type === ta) matches.push({ name, flip: true });
+        if (isA(ta, reg.source.type) && isA(tb, reg.dest.type)) matches.push({ name, flip: false });
+        else if (isA(tb, reg.source.type) && isA(ta, reg.dest.type)) matches.push({ name, flip: true });
       }
       if (!matches.length) { err(st.ln, `no edge type known between ${ta} and ${tb} — see the inference table in dsl/spec.md`); continue; }
       if (matches.length > 1) { err(st.ln, `ambiguous edge between ${ta} and ${tb} (${matches.map(m => m.name).join(", ")}) — write the type explicitly`); continue; }
@@ -451,7 +462,7 @@ function parse(src, registry) {
     let ok = true;
     args.forEach((label, i) => {
       if (!nodes.has(label)) { err(st.ln, `unknown node "${label}" in guard`); ok = false; }
-      else if (nodes.get(label).type !== expected[i]) {
+      else if (!isA(nodes.get(label).type, expected[i])) {
         err(st.ln, `${name} expects ${expected[i]} for argument ${i + 1}, got ${nodes.get(label).type} ("${label}")`);
         ok = false;
       }
