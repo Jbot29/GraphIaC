@@ -25,6 +25,8 @@ Because AWS permission patterns are stable, that knowledge gets written once int
 pip install --upgrade GraphIaC
 ```
 
+Using the `graphiac-deploy` role from [`examples/get-started/`](examples/get-started/)? **After upgrading, re-run its setup** — new versions add AWS actions the live role doesn't know until re-synced (the symptom is a surprising `AccessDenied`).
+
 **2. Have an AWS profile ready.** GraphIaC uses your local AWS credentials (`~/.aws/credentials`), selected by profile name. The profile needs permissions for whatever you plan to manage (for early testing, an admin-ish sandbox account is the practical choice).
 
 **3. Write an infra file.** Infrastructure is described in a small language (files end in `.giac`). A complete static website:
