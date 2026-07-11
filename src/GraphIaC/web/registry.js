@@ -287,6 +287,7 @@ return {
           "required": false
         }
       },
+      "isa": null,
       "nameField": null
     },
     "ALB": {
@@ -310,6 +311,7 @@ return {
           "required": true
         }
       },
+      "isa": null,
       "nameField": "name"
     },
     "ApiEndpoint": {
@@ -324,6 +326,7 @@ return {
           "required": true
         }
       },
+      "isa": null,
       "nameField": "endpoint_name"
     },
     "ApiSite": {
@@ -352,6 +355,7 @@ return {
           "required": false
         }
       },
+      "isa": null,
       "nameField": "site_name"
     },
     "CloudFrontDistribution": {
@@ -388,6 +392,7 @@ return {
           "required": false
         }
       },
+      "isa": null,
       "nameField": null
     },
     "CloudFrontFunction": {
@@ -411,6 +416,7 @@ return {
           "required": false
         }
       },
+      "isa": null,
       "nameField": "name"
     },
     "CognitoUserPool": {
@@ -439,6 +445,7 @@ return {
           "required": false
         }
       },
+      "isa": null,
       "nameField": "pool_name"
     },
     "CognitoUserPoolClient": {
@@ -467,6 +474,7 @@ return {
           "required": false
         }
       },
+      "isa": null,
       "nameField": "client_name"
     },
     "DeployRole": {
@@ -492,6 +500,7 @@ return {
           "required": false
         }
       },
+      "isa": "IAMRole",
       "nameField": "name"
     },
     "DynamoTable": {
@@ -527,6 +536,7 @@ return {
           "required": false
         }
       },
+      "isa": null,
       "nameField": "table_name"
     },
     "HostedZone": {
@@ -539,6 +549,7 @@ return {
           "required": false
         }
       },
+      "isa": null,
       "nameField": null
     },
     "IAMRole": {
@@ -559,12 +570,17 @@ return {
           "required": false
         }
       },
+      "isa": null,
       "nameField": "name"
     },
     "LambdaZipFile": {
       "fields": {
         "description": {
           "default": "No description",
+          "required": false
+        },
+        "env": {
+          "default": {},
           "required": false
         },
         "handler": {
@@ -604,6 +620,7 @@ return {
           "required": true
         }
       },
+      "isa": null,
       "nameField": "name"
     },
     "Listener": {
@@ -612,6 +629,7 @@ return {
           "required": true
         }
       },
+      "isa": null,
       "nameField": null
     },
     "Route53AliasRecord": {
@@ -630,6 +648,7 @@ return {
           "required": true
         }
       },
+      "isa": null,
       "nameField": null
     },
     "S3Bucket": {
@@ -646,6 +665,7 @@ return {
           "required": false
         }
       },
+      "isa": null,
       "nameField": "bucket_name"
     },
     "SESDomainIdentity": {
@@ -666,6 +686,7 @@ return {
           "required": false
         }
       },
+      "isa": null,
       "nameField": null
     },
     "SecurityGroup": {
@@ -684,6 +705,7 @@ return {
           "required": true
         }
       },
+      "isa": null,
       "nameField": null
     }
   },

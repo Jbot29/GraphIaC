@@ -483,6 +483,16 @@ def parse(src, registry=None):
         node["fields"] = fields
         graph["nodes"].append({"g_id": node["g_id"], "type": node["type"], "fields": fields, "line": node["line"]})
 
+    # a subclass node matches its ancestors' edge endpoints and guard
+    # targets (registry "isa" chain — DeployRole rides IAMRole's edges,
+    # S3BucketKMS will ride S3Bucket's)
+    def _is_a(actual, want):
+        while actual is not None:
+            if actual == want:
+                return True
+            actual = registry["nodes"].get(actual, {}).get("isa")
+        return False
+
     # ---- edges ----
     seen_edges = set()
     for st in edge_stmts:
@@ -525,9 +535,9 @@ def parse(src, registry=None):
             if not reg:
                 err(st["ln"], f'unknown edge type "{explicit_type}"')
                 continue
-            if reg["source"]["type"] == ta and reg["dest"]["type"] == tb:
+            if _is_a(ta, reg["source"]["type"]) and _is_a(tb, reg["dest"]["type"]):
                 pass  # as written
-            elif reg["source"]["type"] == tb and reg["dest"]["type"] == ta:
+            elif _is_a(tb, reg["source"]["type"]) and _is_a(ta, reg["dest"]["type"]):
                 src_label, dst_label = b_label, a_label
             else:
                 err(st["ln"], f'{explicit_type} connects {reg["source"]["type"]} -> {reg["dest"]["type"]}, not {ta} -> {tb}')
@@ -536,9 +546,9 @@ def parse(src, registry=None):
         else:
             matches = []
             for name, reg in registry["edges"].items():
-                if reg["source"]["type"] == ta and reg["dest"]["type"] == tb:
+                if _is_a(ta, reg["source"]["type"]) and _is_a(tb, reg["dest"]["type"]):
                     matches.append((name, False))
-                elif reg["source"]["type"] == tb and reg["dest"]["type"] == ta:
+                elif _is_a(tb, reg["source"]["type"]) and _is_a(ta, reg["dest"]["type"]):
                     matches.append((name, True))
             if not matches:
                 err(st["ln"], f"no edge type known between {ta} and {tb} — see the inference table in dsl/spec.md")
@@ -599,7 +609,7 @@ def parse(src, registry=None):
             if label not in nodes:
                 err(st["ln"], f'unknown node "{label}" in guard')
                 ok = False
-            elif nodes[label]["type"] != want:
+            elif not _is_a(nodes[label]["type"], want):
                 err(st["ln"], f'{name} expects {want} for argument {i + 1}, got {nodes[label]["type"]} ("{label}")')
                 ok = False
         if ok:

@@ -1,0 +1,38 @@
+# GraphIaC hosting GraphIaC: the editor UI you run locally with `serve`,
+# deployed as a Lambda with a public URL, Cognito login, and state +
+# source in S3. Nothing here is special-cased — it's the lambda-ui
+# pattern with GraphIaC itself as the payload.
+#
+# Before running:
+#   1. team-state first (the state bucket must exist) — set state-url below
+#   2. ./build.sh                   (grabs GraphIaC from PyPI into the zip)
+#   3. python -m GraphIaC graphiac --infra_file ui.giac run
+#   4. create yourself a user (see examples/lambda-ui — same two commands,
+#      pool id printed on create)
+#
+# Then open the printed function URL: sign in, and you're editing,
+# planning, and running your infrastructure from anywhere. Runs take the
+# same S3 lock as CLI runs — a laptop run and a hosted run can't collide.
+#
+# After upgrading GraphIaC: rebuild (step 2) and run again to redeploy.
+# Note: file("...") values don't resolve in the hosted UI yet (no local
+# files next to the source) — keep hosted sources self-contained.
+
+state-url = "s3://YOUR-STATE-BUCKET/graphiac"   # from examples/team-state
+
+graphiac-deploy : DeployRole                     # imported from get-started
+
+graphiac-ui-users : CognitoUserPool(region: "us-east-2")
+graphiac-ui-login : CognitoUserPoolClient(password_auth: true)
+
+graphiac-ui : LambdaZipFile(runtime: "python3.13", handler: "handler.handler",
+                            zip_file_path: "./deployment.zip", public_url: true,
+                            region: "us-east-2", timeout: 300, memory_size: 512,
+                            env: {GRAPHIAC_STATE: state-url})
+
+graphiac-deploy   -> graphiac-ui       # the deploy role IS the execution role
+graphiac-ui-users -> graphiac-ui-login
+graphiac-ui-login -> graphiac-ui       # COGNITO_* wired in
+
+? admin-only-signup(graphiac-ui-users)
+? authed(graphiac-ui)
