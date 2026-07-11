@@ -147,6 +147,18 @@ class LambdaZipFile(BaseNode):
 
         iam_role = G.nodes[role_edge.role_g_id]["data"]
 
+        # The role must trust Lambda BEFORE create_function — and the edge
+        # that owns that trust runs after nodes. An imported role (e.g.
+        # graphiac-deploy, which starts with account-root trust only) would
+        # otherwise fail "cannot be assumed" forever. Assert it here; the
+        # edge's own upsert then finds it already in place.
+        try:
+            if not _lambda_trusted(get_trust_policy_for_role(session, iam_role.read_id)):
+                upsert_trust_statement_for_role(session, iam_role.read_id, stmt)
+                logger.info(f"Added Lambda trust to role {iam_role.read_id}")
+        except ClientError as e:
+            logger.error(f"Could not check trust policy on {iam_role.read_id}: {e}")
+
         result = lambda_create(
             session,
             self.name,
