@@ -182,12 +182,21 @@ def test_miniui_full_session(miniui_app):
     assert resp["statusCode"] == 401
     assert "wrong email or password" in resp["body"]
 
-    # real login -> session cookie + redirect home
+    # real login -> hardened session cookie + redirect home
     resp = app.handler(event("/login", "POST",
                              "email=me%40example.com&password=CorrectHorse9!"), None)
     assert resp["statusCode"] == 303
-    cookie = resp["cookies"][0].split(";")[0]
-    assert cookie.startswith("miniui_session=")
+    set_cookie = resp["cookies"][0]
+    assert set_cookie.startswith("__Host-miniui_session=")
+    for attr in ("HttpOnly", "Secure", "SameSite=Strict", "Path=/"):
+        assert attr in set_cookie, attr
+    cookie = set_cookie.split(";")[0]
+
+    # every response carries the security headers
+    for h in ("Content-Security-Policy", "X-Content-Type-Options",
+              "X-Frame-Options", "Strict-Transport-Security"):
+        assert h in resp["headers"], h
+    assert resp["headers"]["X-Frame-Options"] == "DENY"
 
     # signed in: static index served from the zip's static/
     resp = app.handler(event("/", cookies=[cookie]), None)
@@ -204,18 +213,25 @@ def test_miniui_full_session(miniui_app):
     assert '"you_sent": {"message": "hi"}' in resp["body"]
     assert "me@example.com" in resp["body"]
 
+    # CSRF: a GET navigation to an API (which SameSite would let ride the
+    # cookie) is refused — APIs are POST-only
+    resp = app.handler(event("/api/echo", "GET", cookies=[cookie]), None)
+    assert resp["statusCode"] == 405
+
     # unknown api -> 404; api without auth -> login page
     assert app.handler(event("/api/nope", "POST", "{}", [cookie]), None)["statusCode"] == 404
     assert app.handler(event("/api/echo", "POST", "{}"), None)["statusCode"] == 401
 
-    # path traversal out of static/ -> 404
-    resp = app.handler(event("/../miniui.py", cookies=[cookie]), None)
-    assert resp["statusCode"] == 404
+    # path traversal out of static/ -> 404 (both ../ and the sibling-prefix trick)
+    assert app.handler(event("/../miniui.py", cookies=[cookie]), None)["statusCode"] == 404
+    assert app.handler(event("/../static.bak/secret", cookies=[cookie]), None)["statusCode"] == 404
 
-    # logout kills the session
+    # logout revokes at Cognito, not just the cookie
     resp = app.handler(event("/logout", cookies=[cookie]), None)
     assert resp["statusCode"] == 303
     assert "Max-Age=0" in resp["cookies"][0]
+    # the access token is now globally signed out -> whoami fails -> re-login
+    assert app.handler(event("/", cookies=[cookie]), None)["statusCode"] == 401
 
 
 def test_create_function_retries_role_propagation(aws, zip_path, monkeypatch):
@@ -300,3 +316,29 @@ def test_create_asserts_lambda_trust_on_imported_role(aws, zip_path, tmp_path):
     services = [s.get("Principal", {}).get("Service") for s in doc["Statement"]]
     assert "lambda.amazonaws.com" in services
     aws.client("lambda", region_name=REGION).get_function(FunctionName="trust-fn")
+
+
+def test_serve_api_error_returns_generic_500(miniui_app, monkeypatch):
+    """An API that raises must not crash the invocation or leak internals."""
+    import miniui
+
+    def boom(payload, user):
+        raise ZeroDivisionError("secret internal detail")
+
+    monkeypatch.setattr(miniui, "_whoami", lambda t: "me@example.com")  # forge a session
+
+    ev = event("/api/boom", "POST", "{}", cookies=["__Host-miniui_session=x"])
+    resp = miniui.serve(ev, {"boom": boom})
+    assert resp["statusCode"] == 500
+    assert "internal error" in resp["body"]
+    assert "secret internal detail" not in resp["body"]
+    assert "ZeroDivision" not in resp["body"]
+
+
+def test_login_never_raises_on_hostile_input(miniui_app):
+    import miniui
+
+    # empty creds short-circuit before Cognito; a wrong password is a
+    # ClientError; neither may escape as a 500
+    assert miniui._login("", "") is None
+    assert miniui._login("me@example.com", "wrong-pass-xyz") is None

@@ -18,7 +18,18 @@ import os
 
 import boto3
 from botocore.exceptions import ClientError
-from miniui import COOKIE, LOGIN_PAGE, _login, _request, _respond, _whoami
+from miniui import (
+    COOKIE,
+    _cleared_cookie,
+    _login,
+    _login_page,
+    _logout,
+    _redirect,
+    _request,
+    _respond,
+    _session_cookie,
+    _whoami,
+)
 
 from GraphIaC.server import Api
 
@@ -102,31 +113,39 @@ def handler(event, context):
         return _respond(500, "GRAPHIAC_STATE env not set — see ui.giac", "text/plain")
     req = _request(event)
 
-    # ---- auth (miniui, unchanged) ----
+    # ---- auth (miniui, hardened: Strict __Host- cookie, token revoked on
+    #      logout, escaped login page — all via the shared helpers) ----
     if req["path"] == "/login" and req["method"] == "POST":
         import urllib.parse
 
         form = urllib.parse.parse_qs(req["body"])
         token = _login(form.get("email", [""])[0], form.get("password", [""])[0])
         if not token:
-            return _respond(401, LOGIN_PAGE.format(error="wrong email or password"))
-        cookie = f"{COOKIE}={token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600"
-        return {"statusCode": 303, "headers": {"Location": "/"}, "cookies": [cookie], "body": ""}
+            return _respond(401, _login_page("wrong email or password"))
+        return _redirect("/", cookies=[_session_cookie(token)])
     if req["path"] == "/logout":
-        gone = f"{COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"
-        return {"statusCode": 303, "headers": {"Location": "/"}, "cookies": [gone], "body": ""}
+        _logout(req["cookies"].get(COOKIE))
+        return _redirect("/", cookies=[_cleared_cookie()])
 
     user = _whoami(req["cookies"].get(COOKIE))
     if not user:
-        return _respond(401, LOGIN_PAGE.format(error=""))
+        return _respond(401, _login_page())
 
     # ---- the GraphIaC API, exactly as served locally ----
+    # Mutating routes are POST-only (CSRF: a cross-site GET cannot ride the
+    # SameSite=Strict cookie); /api/source GET is a read.
     api = _get_api()
     if req["path"] == "/api/source":
         if req["method"] == "POST":
-            return _json(api.post_source(json.loads(req["body"] or "{}")))
+            try:
+                return _json(api.post_source(json.loads(req["body"] or "{}")))
+            except Exception:  # noqa: BLE001 — never leak internals / crash the invocation
+                return _json((500, {"error": "internal error"}))
         return _json(api.get_source())
-    if req["path"].startswith("/api/") and req["method"] == "POST":
+    if req["path"].startswith("/api/"):
+        if req["method"] != "POST":
+            return _respond(405, json.dumps({"error": "POST required"}),
+                            "application/json", headers={"Allow": "POST"})
         route = {"/api/plan": api.post_plan, "/api/run": api.post_run,
                  "/api/verify": api.post_verify}.get(req["path"])
         if not route:
@@ -135,7 +154,10 @@ def handler(event, context):
             body = json.loads(req["body"] or "{}")
         except json.JSONDecodeError:
             return _json((400, {"error": "body must be JSON"}))
-        return _json(route(body))
+        try:
+            return _json(route(body))
+        except Exception:  # noqa: BLE001
+            return _json((500, {"error": "internal error"}))
 
     # ---- the editor itself, straight from the GraphIaC package ----
     return _static(req["path"])

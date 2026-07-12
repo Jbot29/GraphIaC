@@ -65,7 +65,11 @@ def login(app):
     resp = app.handler(event("/login", "POST",
                              "email=me%40example.com&password=CorrectHorse9!"), None)
     assert resp["statusCode"] == 303
-    return resp["cookies"][0].split(";")[0]
+    set_cookie = resp["cookies"][0]
+    assert set_cookie.startswith("__Host-graphiac") or set_cookie.startswith("__Host-miniui")
+    assert "SameSite=Strict" in set_cookie
+    assert "Content-Security-Policy" in resp["headers"]
+    return set_cookie.split(";")[0]
 
 
 def test_hosted_ui_full_arc(app):
@@ -83,6 +87,9 @@ def test_hosted_ui_full_arc(app):
     for asset in ("/graphiac.js", "/registry.js"):
         r = app.handler(event(asset, cookies=[cookie]), None)
         assert r["statusCode"] == 200 and "javascript" in r["headers"]["Content-Type"]
+
+    # CSRF: run is state-changing — a GET must not invoke it
+    assert app.handler(event("/api/run", "GET", cookies=[cookie]), None)["statusCode"] == 405
 
     # source: default template first, then saved to S3
     resp = app.handler(event("/api/source", cookies=[cookie]), None)
