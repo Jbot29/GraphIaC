@@ -1,14 +1,24 @@
 """The GraphIaC backend server — hand-rolled, no framework.
 
-Serves the sandbox (src/GraphIaC/web/) and a five-route JSON API that
-turns the editor into a control panel:
+Serves the sandbox (src/GraphIaC/web/) and a JSON API that turns the
+editor into a control panel over a *workspace* — the directory holding
+the infra file passed to `serve`. Every .giac file under that directory
+(subdirectories included) is loadable in-session; each keeps its own
+state DB.
 
     GET  /               the sandbox (index.html, graphiac.js, registry.js)
-    GET  /api/source     the .giac source on disk
-    POST /api/source     save the editor's source back to disk   {source}
-    POST /api/plan       parse + load + plan                     {source}
-    POST /api/run        parse + load + run (applies to AWS!)    {source}
-    POST /api/verify     parse + load + verify                   {source}
+    GET  /api/files      every .giac in the workspace               {files, default, state}
+    GET  /api/source     a .giac source on disk                     ?file=rel/path.giac
+    POST /api/source     save source back to disk (creates new)     {source, file?}
+    POST /api/plan       parse + load + plan                        {source, file?}
+    POST /api/run        parse + load + run (applies to AWS!)       {source, file?}
+    POST /api/verify     parse + load + verify                      {source, file?}
+
+`file` is always workspace-relative (e.g. "newsletter/newsletter.giac");
+it defaults to the file `serve` was started with. State per script:
+local mode keeps `<script>.db` next to each script; `--state s3://…`
+maps each script to `<prefix>/<relative-path>.db` so same-named scripts
+in different subdirectories cannot collide.
 
 Design notes:
   - `Api` is transport-agnostic: plain dicts in, (status, dict) out. The
@@ -24,11 +34,11 @@ Start it:  python -m GraphIaC <profile> --infra_file site.giac serve
 """
 
 import json
-import os
 import sqlite3
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import GraphIaC
 from GraphIaC import dsl
@@ -63,42 +73,73 @@ class Api:
     def __init__(self, session, infra_path, state_url=None):
         self.session = session
         self.infra_path = Path(infra_path)
-        self.db_path = str(self.infra_path.with_suffix(".db"))
+        self.root = self.infra_path.parent.resolve()  # the workspace
+        self.default_file = self.infra_path.name
         self.state_url = state_url  # s3://bucket[/prefix] — None = local .db
         self.lock = threading.Lock()  # one engine operation at a time
 
-    def _backend(self):
+    def _resolve(self, file):
+        """A workspace-relative .giac path -> (absolute Path, relative posix
+        str), or (None, None) for anything that escapes the workspace.
+        Resolves symlinks first, so a link pointing outside is rejected too."""
+        rel = file if file is not None else self.default_file
+        if not isinstance(rel, str) or not rel.endswith(".giac") or Path(rel).is_absolute():
+            return None, None
+        target = (self.root / rel).resolve()
+        try:
+            return target, target.relative_to(self.root).as_posix()
+        except ValueError:  # escaped the workspace
+            return None, None
+
+    def _backend(self, db_name):
         """A fresh S3State per operation, so every request works against
-        the latest published state."""
+        the latest published state. db_name is workspace-relative so
+        subdirectory scripts get distinct keys under the prefix."""
         if not self.state_url:
             return None
         from GraphIaC.state import S3State
 
-        return S3State(self.session, self.state_url, self.infra_path.with_suffix(".db").name)
+        return S3State(self.session, self.state_url, db_name)
+
+    # ---- workspace ----
+    def get_files(self):
+        files = sorted(
+            p.relative_to(self.root).as_posix()
+            for p in self.root.rglob("*.giac")
+            if not any(part.startswith(".") for part in p.relative_to(self.root).parts)
+        )
+        return 200, {"files": files, "default": self.default_file, "state": self.state_url}
 
     # ---- source file ----
-    def get_source(self):
-        source = self.infra_path.read_text() if self.infra_path.exists() else ""
-        return 200, {"source": source, "path": str(self.infra_path), "state": self.state_url}
+    def get_source(self, file=None):
+        path, rel = self._resolve(file)
+        if not path:
+            return 400, {"error": f"not a .giac file in the workspace: {file}"}
+        source = path.read_text() if path.exists() else ""
+        return 200, {"source": source, "file": rel, "path": str(path), "state": self.state_url}
 
     def post_source(self, body):
         if "source" not in body:
             return 400, {"error": 'missing "source"'}
-        self.infra_path.write_text(body["source"])
-        return 200, {"saved": True, "path": str(self.infra_path)}
+        path, rel = self._resolve(body.get("file"))
+        if not path:
+            return 400, {"error": f'not a .giac file in the workspace: {body.get("file")}'}
+        path.parent.mkdir(parents=True, exist_ok=True)  # new scripts may sit in new subdirs
+        path.write_text(body["source"])
+        return 200, {"saved": True, "file": rel, "path": str(path)}
 
     # ---- engine ----
-    def _load(self, source, backend=None):
+    def _load(self, source, path, backend=None):
         """source -> (state, blocked, error_response). Fresh state per call;
-        the DB comes from S3 (via backend) or the local .db — exactly what
-        the CLI does."""
+        the DB comes from S3 (via backend) or the .db next to the script —
+        exactly what the CLI does."""
         res = dsl.parse(source)
         if res["errors"]:
             return None, None, (400, {"errors": res["errors"], "warnings": res["warnings"]})
-        conn = sqlite3.connect(backend.fetch() if backend else self.db_path)
+        conn = sqlite3.connect(backend.fetch() if backend else str(path.with_suffix(".db")))
         state = GraphIaC.init(self.session, conn)
         try:
-            blocked = dsl.load_graph(state, res["graph"], base_dir=self.infra_path.parent)
+            blocked = dsl.load_graph(state, res["graph"], base_dir=path.parent)
         except FileNotFoundError as e:
             conn.close()
             return None, None, (400, {"error": str(e)})
@@ -109,11 +150,14 @@ class Api:
         takes the S3 lock and publishes the DB back; reads stay lock-free."""
         if "source" not in body:
             return 400, {"error": 'missing "source"'}
+        path, rel = self._resolve(body.get("file"))
+        if not path:
+            return 400, {"error": f'not a .giac file in the workspace: {body.get("file")}'}
         if not self.lock.acquire(blocking=False):
             return 409, {"error": "another operation is running — try again"}
         backend = None
         try:
-            backend = self._backend()
+            backend = self._backend(Path(rel).with_suffix(".db").as_posix())
             if backend and s3_lock_op:
                 from GraphIaC.state import LockHeld
 
@@ -121,7 +165,7 @@ class Api:
                     backend.acquire(s3_lock_op)
                 except LockHeld as e:
                     return 423, {"error": str(e)}  # HTTP 423 Locked
-            state, blocked, err = self._load(body["source"], backend)
+            state, blocked, err = self._load(body["source"], path, backend)
             if err:
                 return err
             try:
@@ -199,12 +243,15 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
-        path = self.path.split("?")[0]
-        if path == "/api/source":
-            return self._json(*self.api.get_source())
-        if path.startswith("/api/"):
+        url = urlparse(self.path)
+        if url.path == "/api/files":
+            return self._json(*self.api.get_files())
+        if url.path == "/api/source":
+            file = parse_qs(url.query).get("file", [None])[0]
+            return self._json(*self.api.get_source(file))
+        if url.path.startswith("/api/"):
             return self._json(404, {"error": "not found"})
-        return self._static(path)
+        return self._static(url.path)
 
     def do_POST(self):
         path = self.path.split("?")[0]
@@ -231,7 +278,10 @@ def serve(session, infra_path, port=8642, host="127.0.0.1", state_url=None):
     Handler.api = Api(session, infra_path, state_url=state_url)
     httpd = ThreadingHTTPServer((host, port), Handler)
     where = f" (state: {state_url})" if state_url else ""
-    logger.plan(f"GraphIaC serving {os.path.basename(str(infra_path))} at http://{host}:{port}{where}")
+    logger.plan(
+        f"GraphIaC serving workspace {Handler.api.root} at http://{host}:{port}"
+        f" (default: {Handler.api.default_file}){where}"
+    )
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

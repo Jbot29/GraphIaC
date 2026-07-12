@@ -101,6 +101,72 @@ def test_busy_lock_returns_409(api):
 
 
 # ---------------------------------------------------------------------
+# workspace: every .giac under the served directory, switchable per
+# request via the `file` param; each script keeps its own state DB
+# ---------------------------------------------------------------------
+NEWS_SRC = "news-bucket : S3Bucket\n"
+
+
+@pytest.fixture
+def ws_api(monkeypatch, tmp_path):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    (tmp_path / "main.giac").write_text(SRC)
+    news = tmp_path / "newsletter"
+    news.mkdir()
+    (news / "newsletter.giac").write_text(NEWS_SRC)
+    (news / "lambda-code").mkdir()  # non-.giac clutter stays invisible
+    hidden = tmp_path / ".checkpoints"
+    hidden.mkdir()
+    (hidden / "old.giac").write_text(SRC)  # dot-dirs stay invisible too
+    with mock_aws():
+        session = boto3.session.Session(region_name="us-east-1")
+        yield Api(session, str(tmp_path / "main.giac"))
+
+
+def test_files_lists_workspace(ws_api):
+    status, data = ws_api.get_files()
+    assert status == 200
+    assert data["files"] == ["main.giac", "newsletter/newsletter.giac"]
+    assert data["default"] == "main.giac"
+
+
+def test_source_by_file_param(ws_api):
+    status, data = ws_api.get_source("newsletter/newsletter.giac")
+    assert status == 200
+    assert data["source"] == NEWS_SRC
+    assert data["file"] == "newsletter/newsletter.giac"
+    # no file param -> the file serve was started with
+    assert ws_api.get_source()[1]["source"] == SRC
+
+
+def test_file_param_rejects_escapes(ws_api):
+    for bad in ("../evil.giac", "/etc/evil.giac", "main.py", "newsletter/../../evil.giac"):
+        assert ws_api.get_source(bad)[0] == 400
+        assert ws_api.post_source({"source": "", "file": bad})[0] == 400
+        assert ws_api.post_plan({"source": SRC, "file": bad})[0] == 400
+
+
+def test_per_file_state_db(ws_api, tmp_path):
+    status, data = ws_api.post_run({"source": NEWS_SRC, "file": "newsletter/newsletter.giac"})
+    assert status == 200
+    # state lands next to the script it belongs to
+    assert (tmp_path / "newsletter" / "newsletter.db").exists()
+    assert not (tmp_path / "main.db").exists()
+    # newsletter converged; main plans against its own (empty) state
+    assert ws_api.post_plan({"source": NEWS_SRC, "file": "newsletter/newsletter.giac"})[1]["ops"] == []
+    assert ws_api.post_plan({"source": SRC})[1]["ops"][0]["op"] == "create"
+
+
+def test_new_script_in_new_subdir(ws_api, tmp_path):
+    status, data = ws_api.post_source({"source": NEWS_SRC, "file": "billing/billing.giac"})
+    assert status == 200 and data["saved"]
+    assert (tmp_path / "billing" / "billing.giac").read_text() == NEWS_SRC
+    assert "billing/billing.giac" in ws_api.get_files()[1]["files"]
+
+
+# ---------------------------------------------------------------------
 # serve with --state: the control panel against S3-backed state
 # ---------------------------------------------------------------------
 @pytest.fixture
@@ -141,6 +207,18 @@ def test_s3_api_run_publishes_and_plan_reads_back(s3_api, tmp_path):
     from GraphIaC.state import S3State
 
     S3State(s3_api.session, "s3://ui-state/team", "demo.db").acquire("check")
+
+
+def test_s3_state_key_includes_subdir(s3_api, tmp_path):
+    """Same-named scripts in different subdirectories must not share a
+    state object: the relative path is part of the S3 key."""
+    (tmp_path / "newsletter").mkdir()
+    (tmp_path / "newsletter" / "newsletter.giac").write_text(NEWS_SRC)
+
+    status, data = s3_api.post_run({"source": NEWS_SRC, "file": "newsletter/newsletter.giac"})
+    assert status == 200
+    s3_api.session.client("s3").head_object(Bucket="ui-state", Key="team/newsletter/newsletter.db")
+    assert not (tmp_path / "newsletter" / "newsletter.db").exists()
 
 
 def test_s3_api_run_locked_returns_423(s3_api):

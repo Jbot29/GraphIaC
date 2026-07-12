@@ -40,6 +40,14 @@
     font-family:var(--mono); font-size:13px; line-height:1.6; padding:12px 14px; tab-size:2; }
   #editor:focus { outline:none; border-color:var(--water); }
 
+  /* workspace file picker (server mode only) */
+  #fileBar { display:inline-flex; gap:6px; align-items:center; margin-left:10px; }
+  #fileBar[hidden] { display:none; }
+  #filePick { font-family:var(--mono); font-size:11px; letter-spacing:0; text-transform:none;
+    background:#fbf8ef; color:var(--ink); border:2px solid var(--ink); padding:2px 4px; max-width:260px; }
+  #filePick:focus { outline:none; border-color:var(--water); }
+  #newFileBtn { font-size:10px; padding:2px 8px; box-shadow:none; }
+
   .controls { display:flex; gap:8px; align-items:center; flex:none; }
   #serverBar { display:inline-flex; gap:8px; }
   #serverBar[hidden] { display:none; }
@@ -92,7 +100,7 @@
 
   <div class="workspace">
     <div class="col">
-      <div class="panel-label"><span>Source</span><span class="hint">label : Type(…) · a -&gt; b · other.field</span></div>
+      <div class="panel-label"><span>Source<span id="fileBar" hidden><select id="filePick" title="every .giac in the workspace — switch scripts without restarting"></select><button id="newFileBtn" class="ghost" title="start a new script (created on save)">+ new</button></span></span><span class="hint">label : Type(…) · a -&gt; b · other.field</span></div>
       <textarea id="editor" spellcheck="false"># Static site: Route53 -> CloudFront (HTTPS) -> S3.
 # The arrows are the point: each one is an IAM policy, a certificate
 # attachment, or a service integration the edge knows how to provision.
@@ -433,11 +441,16 @@ refresh();
 
 /* =====================================================================
  * SERVER MODE — when served by `python -m GraphIaC … serve`, the editor
- * becomes the control panel: save the source, plan, run, verify. Opened
- * as a plain file, none of this exists and the page stays a sandbox.
+ * becomes the control panel over a workspace: every .giac under the
+ * served directory is switchable in-session, each with its own state.
+ * Unsaved edits live in per-file buffers (switching never loses work;
+ * save stays explicit, per file). Opened as a plain file, none of this
+ * exists and the page stays a sandbox.
  * =================================================================== */
 const serverBar = document.getElementById("serverBar");
 const oplog = document.getElementById("oplog");
+const fileBar = document.getElementById("fileBar");
+const filePick = document.getElementById("filePick");
 
 async function api(path, body) {
   const res = await fetch(path, body === undefined ? {} : {
@@ -448,17 +461,71 @@ async function api(path, body) {
   return { status: res.status, data: await res.json() };
 }
 
+/* ---- the workspace: which script is open, what's edited-but-unsaved ---- */
+let currentFile = null;      // workspace-relative path of the open script
+let knownFiles = [];         // everything /api/files reported (+ unsaved new scripts)
+const buffers = new Map();   // file -> editor text (kept across switches)
+const savedSrc = new Map();  // file -> text last seen on / written to disk
+
+function isDirty(f) { return buffers.has(f) && buffers.get(f) !== savedSrc.get(f); }
+function renderFileList() {
+  filePick.innerHTML = "";
+  for (const f of knownFiles) {
+    const o = document.createElement("option");
+    o.value = f;
+    o.textContent = f + (isDirty(f) ? " •" : "");
+    filePick.appendChild(o);
+  }
+  if (currentFile) filePick.value = currentFile;
+}
+async function loadFiles() {
+  const { status, data } = await api("/api/files");
+  if (status !== 200) return null;
+  knownFiles = data.files.slice();
+  if (data.default && !knownFiles.includes(data.default)) knownFiles.push(data.default);
+  for (const f of buffers.keys()) if (!knownFiles.includes(f)) knownFiles.push(f);
+  knownFiles.sort();
+  renderFileList();
+  return data;
+}
+async function openFile(f, { keepEditor = false } = {}) {
+  if (currentFile !== null) buffers.set(currentFile, editor.value);
+  currentFile = f;
+  let src = buffers.get(f);
+  if (src === undefined) {
+    const { status, data } = await api("/api/source?file=" + encodeURIComponent(f));
+    src = status === 200 ? data.source : "";
+    savedSrc.set(f, src);
+  }
+  // keepEditor: first load of an empty/new default file keeps the sandbox demo
+  if (!(keepEditor && !src.trim())) editor.value = src;
+  renderFileList();
+  refresh();  // reparses and clears OPS — another script's plan verdicts don't apply here
+}
+filePick.addEventListener("change", () => openFile(filePick.value));
+editor.addEventListener("input", () => {
+  if (currentFile !== null) { buffers.set(currentFile, editor.value); renderFileList(); }
+});
+document.getElementById("newFileBtn").addEventListener("click", async () => {
+  let name = prompt('New script path (workspace-relative), e.g. "newsletter/site.giac":');
+  if (!name) return;
+  name = name.trim().replace(/^\.\//, "");
+  if (!name.endsWith(".giac")) name += ".giac";
+  if (!knownFiles.includes(name)) { knownFiles.push(name); knownFiles.sort(); }
+  await openFile(name);
+});
+
 (async function detectServer() {
   try {
-    const { status, data } = await api("/api/source");
-    if (status !== 200) return;
-    if (data.source && data.source.trim()) editor.value = data.source;
+    const data = await loadFiles();
+    if (!data) return;
     serverBar.hidden = false;
+    fileBar.hidden = false;
     if (data.state) {
       const hint = document.querySelector(".panel-label .hint");
       if (hint) hint.textContent = "state: " + data.state + " (runs lock)";
     }
-    refresh();
+    await openFile(data.default || knownFiles[0], { keepEditor: true });
   } catch (e) { /* file:// — sandbox only, no controls */ }
 })();
 
@@ -478,7 +545,7 @@ function guardLines(results) {
 async function engine(path, waitMsg) {
   logLines([waitMsg + "…"]);
   try {
-    const { status, data } = await api(path, { source: editor.value });
+    const { status, data } = await api(path, { source: editor.value, file: currentFile });
     if (data.errors) {
       logLines(data.errors.map(e => `<span class="fail">✗ line ${e.line}: ${esc(e.msg)}</span>`));
       return;
@@ -506,13 +573,20 @@ document.getElementById("runBtn").addEventListener("click", () => {
   if (confirm("Apply this plan to AWS?")) engine("/api/run", "applying");
 });
 document.getElementById("saveBtn").addEventListener("click", async () => {
-  const { data } = await api("/api/source", { source: editor.value });
-  statusEl.textContent = data.saved ? "saved → " + data.path : "save failed";
+  const { data } = await api("/api/source", { source: editor.value, file: currentFile });
+  if (data.saved) {
+    savedSrc.set(currentFile, editor.value);
+    buffers.set(currentFile, editor.value);
+    statusEl.textContent = "saved → " + (data.file || data.path);
+    loadFiles();  // a brand-new script now exists on disk — refresh the list
+  } else {
+    statusEl.textContent = "save failed" + (data.error ? ": " + data.error : "");
+  }
 });
 document.getElementById("verifyBtn").addEventListener("click", async () => {
   logLines(["verifying…"]);
   try {
-    const { data } = await api("/api/verify", { source: editor.value });
+    const { data } = await api("/api/verify", { source: editor.value, file: currentFile });
     if (data.errors || data.error) {
       logLines([`<span class="fail">✗ ${esc(JSON.stringify(data.errors || data.error))}</span>`]);
       return;
