@@ -107,6 +107,11 @@ Current node inventory by service:
 - **API Gateway** (`apigateway.py`): `ApiSite`, `ApiEndpoint`
 - **SES** (`ses.py`): `SESDomainIdentity`
 - **Cognito** (`cognito.py`): `CognitoUserPool`, `CognitoUserPoolClient` (metadata-only node; `CognitoPoolClientEdge` provisions the app client; `CognitoLambdaAuthEdge` wires COGNITO_* env into a Lambda so its runtime can authenticate users — see `examples/lambda-ui/`)
+- **ALB** (`ec2/alb.py`): `ALB` (+ `ACMCertificateALBEdge` ⊘ for the HTTPS listener, `ALBRoute53Edge` for the A alias)
+- **ECS / ECR** (`ecs.py`): `EcsCluster`, `EcsTaskRole` (isa `IAMRole`, ECS trust policy), `EcsService` (owns its task definition — no separate node), `EcrRepository`; edges `ClusterServiceEdge`, `IAMRoleEcsEdge`, `AlbEcsEdge`
+- **RDS** (`rds.py`): `RDSPostgres` (`ManageMasterUserPassword` — credentials live only in Secrets Manager) + `EcsRdsEdge`
+
+**Security groups are not a node type** (`ec2/network.py`). Each compute node (ALB, EcsService, RDSPostgres) creates and destroys exactly one group named after itself; the *edges* open ports between them (`alb -> web`, `web -> db`). A group with no rules is meaningless and its rules are always about a relationship — so the relationship owns them. `network.py` also holds default-VPC discovery: nodes leave `vpc_id`/`subnet_ids` unset and get the account's default VPC, which keeps Fargate reachable without a NAT gateway.
 
 ### Two-Phase Pattern for Long-Running Resources
 
@@ -142,7 +147,7 @@ A small declarative language over nodes and edges — spec in `dsl/spec.md`. The
 - `src/GraphIaC/web/index.html` — the live sandbox (editor + graph diagram + desugar). Open directly in a browser; no build step, no npm — keep it that way. Shipped inside the wheel as package data.
 - `dsl.load_graph(state, graph)` — instantiates a parsed graph into a `GraphIaCState`, resolving attribute references (`$ref`) from live AWS state. Unresolvable refs make the node — and everything touching it — **BLOCKED**: reported by `plan(state, blocked=...)`, skipped by `run`, shielded from orphan deletion, and picked up automatically on a later run once the upstream is ready (gated by each node's `ready()`, e.g. ACM cert must be ISSUED). This replaces the two-phase pattern for DSL infra.
 - CLI: `.giac` files work anywhere `.py` infra files do — `python -m GraphIaC <profile> --infra_file site.giac plan|run|verify|diagram`.
-- `src/GraphIaC/server.py` — the backend server, hand-rolled on `http.server` (no framework, by design). `python -m GraphIaC <profile> --infra_file site.giac serve` serves the sandbox at `127.0.0.1:8642` with a JSON API (`GET/POST /api/source`, `POST /api/plan|run|verify`); the editor becomes a live control panel (save/plan/run/verify buttons, plan verdicts badged onto the diagram, BLOCKED nodes greyed out). The `Api` class is transport-agnostic — dicts in, `(status, dict)` out — so the future Lambda-hosted deployment reuses it verbatim. No auth yet: it binds localhost only; keep it that way until Cognito lands.
+- `src/GraphIaC/server.py` — the backend server, hand-rolled on `http.server` (no framework, by design). `python -m GraphIaC <profile> --infra_file site.giac serve` serves the sandbox at `127.0.0.1:8642` with a JSON API (`GET /api/files`, `GET/POST /api/source`, `POST /api/plan|run|verify`); the editor becomes a live control panel (save/plan/run/verify buttons, plan verdicts badged onto the diagram, BLOCKED nodes greyed out). The served directory is a **workspace**: every `.giac` under it (subdirectories included) is switchable in-session via the UI's file picker or the workspace-relative `file` param (validated against traversal; defaults to the file `serve` started with). State is per script — local mode keeps `<script>.db` next to each script; with `--state s3://…` each script maps to `<prefix>/<relative-path>.db` so same-named scripts in different subdirs can't collide. The `Api` class is transport-agnostic — dicts in, `(status, dict)` out — so the future Lambda-hosted deployment reuses it verbatim. No auth yet: it binds localhost only; keep it that way until Cognito lands.
 
 Run the DSL tests: `pytest tests/test_dsl.py tests/test_dsl_load.py` and `node --test src/GraphIaC/web/`
 
@@ -156,7 +161,7 @@ Shared `colorlog` setup. Call `setup_logger()` in new modules rather than callin
 
 ### Guards (`src/GraphIaC/guards.py`)
 
-`? predicate(label, ...)` statements in `.giac` files declare safety invariants (`? private(bucket)`). **Independence rule: predicates are raw boto3 only — never call node/edge class code.** Signatures in `PREDICATES` flow into the generated registry so both parsers validate at parse time. `verify` counts guard failures (exit 1); `run` reports them after applying but never blocks (warn-only by design; `--strict` is future). Pass/fail/pending states — pending = target not created yet. New predicates: add to `PREDICATES` + `_CHECKS`, regenerate the registry, cover pass/fail/pending in `tests/test_guards.py`.
+`? predicate(label, ...)` statements in `.giac` files declare safety invariants (`? private(bucket)`). **Independence rule: predicates are raw boto3 only — never call node/edge class code.** Signatures in `PREDICATES` flow into the generated registry so both parsers validate at parse time. `verify` counts guard failures (exit 1); `run` reports them after applying but never blocks (warn-only by design; `--strict` is future). Pass/fail/pending states — pending = target not created yet. Current set: `private`, `https-only`, `locked-to`, `admin-only-signup`, `authed`, `cors-locked`, `db-private`. New predicates: add to `PREDICATES` + `_CHECKS`, regenerate the registry, cover pass/fail/pending in `tests/test_guards.py`.
 
 ### Deploy Policy Generation (`src/GraphIaC/deploy_policy.py`)
 

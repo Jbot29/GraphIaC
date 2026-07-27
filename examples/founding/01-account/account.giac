@@ -1,0 +1,20 @@
+# Chapter 1 — the account
+#
+# Two resources, and they are the only two that exist before your company
+# does: the identity that deploys everything else, and the place its state
+# lives.
+#
+#   python -m GraphIaC bootstrap --infra_file account.giac run
+#
+# Run this ONCE, with the admin-ish `bootstrap` profile you made by hand
+# (see README.md). Every later chapter uses the role this creates.
+#
+# The run prints a [profile graphiac] snippet — paste it into ~/.aws/config
+# and the bootstrap profile goes back in the drawer.
+
+yourco-state : S3Bucket(region: "us-east-2", versioning: true)
+
+graphiac-deploy : DeployRole
+
+# --- declared invariants: independent checks, never the provisioning code ---
+? private(yourco-state)   # your infrastructure's history is nobody's business

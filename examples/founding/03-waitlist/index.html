@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YourCo</title>
+<style>
+  :root {
+    --bg:#f7f2e6; --ink:#22304a; --muted:rgba(34,48,74,0.6); --rule:#e3d9c2;
+    --field:#fffdf7; --accent:#22304a; --accent-ink:#f7f2e6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#151a24; --ink:#e8e2d4; --muted:rgba(232,226,212,0.55); --rule:#2a3140;
+            --field:#1d232f; --accent:#e8e2d4; --accent-ink:#151a24; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center;
+         background:var(--bg); color:var(--ink);
+         font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+         line-height:1.5; }
+  main { width:min(38rem, 90vw); padding:3rem 0; }
+  .mark { font-size:0.75rem; letter-spacing:0.18em; text-transform:uppercase;
+          color:var(--muted); margin:0 0 2.5rem; }
+  h1 { font-size:clamp(1.8rem, 5vw, 2.6rem); line-height:1.2; margin:0 0 1rem;
+       font-weight:600; letter-spacing:-0.02em; }
+  .lede { color:var(--muted); margin:0 0 2rem; font-size:1.05rem; }
+  form { display:flex; gap:0.5rem; flex-wrap:wrap; margin:0 0 0.75rem; }
+  input { flex:1 1 16rem; min-width:0; padding:0.7rem 0.85rem; font:inherit;
+          font-size:0.95rem; color:var(--ink); background:var(--field);
+          border:1px solid var(--rule); border-radius:4px; }
+  input:focus { outline:2px solid var(--accent); outline-offset:1px; }
+  button { padding:0.7rem 1.4rem; font:inherit; font-size:0.95rem; cursor:pointer;
+           color:var(--accent-ink); background:var(--accent);
+           border:1px solid var(--accent); border-radius:4px; }
+  button[disabled] { opacity:0.55; cursor:default; }
+  .status { min-height:1.5rem; font-size:0.9rem; margin:0; color:var(--muted); }
+  .status.err { color:#b3261e; }
+  @media (prefers-color-scheme: dark) { .status.err { color:#f2b8b5; } }
+  hr { border:0; border-top:1px solid var(--rule); margin:2.5rem 0; }
+  footer { color:var(--muted); font-size:0.85rem; }
+  code { background:var(--rule); padding:0.1rem 0.4rem; border-radius:3px;
+         font-size:0.85em; }
+</style>
+</head>
+<body>
+<main>
+  <p class="mark">YourCo</p>
+
+  <h1>We're building something.</h1>
+
+  <p class="lede">
+    Leave your email and we'll tell you when there's something to see.
+  </p>
+
+  <form id="join">
+    <input id="email" type="email" name="email" required
+           autocomplete="email" placeholder="you@example.com"
+           aria-label="Email address">
+    <button type="submit">Join the list</button>
+  </form>
+  <p class="status" id="status" role="status" aria-live="polite"></p>
+
+  <hr>
+
+  <footer>
+    Declared in one <code>.giac</code> file — chapter 3 of the founding kit.
+  </footer>
+</main>
+
+<script>
+  // ── Paste your API's invoke URL here. `run` prints it; it also lives in
+  //    the state DB. Looks like https://abc123.execute-api.us-east-2.amazonaws.com
+  const API = "https://REPLACE-ME.execute-api.us-east-2.amazonaws.com";
+
+  const form = document.getElementById("join");
+  const field = document.getElementById("email");
+  const status = document.getElementById("status");
+  const button = form.querySelector("button");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    status.className = "status";
+    status.textContent = "…";
+    button.disabled = true;
+    try {
+      const res = await fetch(API + "/signup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: field.value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        status.textContent = data.message || "You're on the list.";
+        form.hidden = true;
+      } else {
+        status.className = "status err";
+        status.textContent = data.error || "Something went wrong. Try again?";
+      }
+    } catch (err) {
+      status.className = "status err";
+      status.textContent = "Couldn't reach the server. Try again?";
+    } finally {
+      button.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

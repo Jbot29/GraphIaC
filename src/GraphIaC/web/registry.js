@@ -11,6 +11,24 @@
 "use strict";
 return {
   "edges": {
+    "ACMCertificateALBEdge": {
+      "dest": {
+        "field": "alb_g_id",
+        "type": "ALB"
+      },
+      "fields": {
+        "alb_g_id": {
+          "required": true
+        },
+        "cert_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "cert_g_id",
+        "type": "ACMCertificate"
+      }
+    },
     "ACMCertificateCloudFrontEdge": {
       "dest": {
         "field": "cf_g_id",
@@ -45,6 +63,49 @@ return {
       "source": {
         "field": "cert_g_id",
         "type": "ACMCertificate"
+      }
+    },
+    "ALBRoute53Edge": {
+      "dest": {
+        "field": "hz_g_id",
+        "type": "HostedZone"
+      },
+      "fields": {
+        "alb_g_id": {
+          "required": true
+        },
+        "domain_name": {
+          "required": true
+        },
+        "hz_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "alb_g_id",
+        "type": "ALB"
+      }
+    },
+    "AlbEcsEdge": {
+      "dest": {
+        "field": "ecs_g_id",
+        "type": "EcsService"
+      },
+      "fields": {
+        "alb_g_id": {
+          "required": true
+        },
+        "ecs_g_id": {
+          "required": true
+        },
+        "health_check_path": {
+          "default": "/",
+          "required": false
+        }
+      },
+      "source": {
+        "field": "alb_g_id",
+        "type": "ALB"
       }
     },
     "CloudFrontFunctionEdge": {
@@ -108,6 +169,24 @@ return {
         "type": "CloudFrontDistribution"
       }
     },
+    "ClusterServiceEdge": {
+      "dest": {
+        "field": "service_g_id",
+        "type": "EcsService"
+      },
+      "fields": {
+        "cluster_g_id": {
+          "required": true
+        },
+        "service_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "cluster_g_id",
+        "type": "EcsCluster"
+      }
+    },
     "CognitoLambdaAuthEdge": {
       "dest": {
         "field": "fn_g_id",
@@ -144,6 +223,31 @@ return {
         "type": "CognitoUserPool"
       }
     },
+    "EcsRdsEdge": {
+      "dest": {
+        "field": "rds_g_id",
+        "type": "RDSPostgres"
+      },
+      "fields": {
+        "ecs_g_id": {
+          "required": true
+        },
+        "policy_doc": {
+          "default": null,
+          "required": false
+        },
+        "rds_g_id": {
+          "required": true
+        },
+        "role_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "ecs_g_id",
+        "type": "EcsService"
+      }
+    },
     "EndpointLambdaEdge": {
       "dest": {
         "field": "lambda_node_g_id",
@@ -160,6 +264,24 @@ return {
       "source": {
         "field": "endpoint_node_g_id",
         "type": "ApiEndpoint"
+      }
+    },
+    "IAMRoleEcsEdge": {
+      "dest": {
+        "field": "service_g_id",
+        "type": "EcsService"
+      },
+      "fields": {
+        "role_g_id": {
+          "required": true
+        },
+        "service_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "role_g_id",
+        "type": "EcsTaskRole"
       }
     },
     "IAMRolePolicyLambdaEdge": {
@@ -282,7 +404,15 @@ return {
         "domain_name": {
           "required": true
         },
+        "region": {
+          "default": "us-east-1",
+          "required": false
+        },
         "status": {
+          "default": null,
+          "required": false
+        },
+        "subject_alternative_names": {
           "default": null,
           "required": false
         }
@@ -296,19 +426,40 @@ return {
           "default": null,
           "required": false
         },
-        "desc": {
-          "default": "",
+        "canonical_hosted_zone_id": {
+          "default": null,
+          "required": false
+        },
+        "dns_name": {
+          "default": null,
           "required": false
         },
         "name": {
           "required": true
         },
         "region": {
-          "default": "us-east-1",
+          "default": "us-east-2",
           "required": false
         },
-        "subnets": {
-          "required": true
+        "scheme": {
+          "default": "internet-facing",
+          "required": false
+        },
+        "security_group_id": {
+          "default": null,
+          "required": false
+        },
+        "state": {
+          "default": null,
+          "required": false
+        },
+        "subnet_ids": {
+          "default": null,
+          "required": false
+        },
+        "vpc_id": {
+          "default": null,
+          "required": false
         }
       },
       "isa": null,
@@ -539,6 +690,145 @@ return {
       "isa": null,
       "nameField": "table_name"
     },
+    "EcrRepository": {
+      "fields": {
+        "immutable_tags": {
+          "default": false,
+          "required": false
+        },
+        "name": {
+          "required": true
+        },
+        "region": {
+          "default": "us-east-2",
+          "required": false
+        },
+        "scan_on_push": {
+          "default": true,
+          "required": false
+        },
+        "uri": {
+          "default": null,
+          "required": false
+        }
+      },
+      "isa": null,
+      "nameField": "name"
+    },
+    "EcsCluster": {
+      "fields": {
+        "arn": {
+          "default": null,
+          "required": false
+        },
+        "name": {
+          "required": true
+        },
+        "region": {
+          "default": "us-east-2",
+          "required": false
+        },
+        "status": {
+          "default": null,
+          "required": false
+        }
+      },
+      "isa": null,
+      "nameField": "name"
+    },
+    "EcsService": {
+      "fields": {
+        "assign_public_ip": {
+          "default": true,
+          "required": false
+        },
+        "cluster_name": {
+          "default": null,
+          "required": false
+        },
+        "container_port": {
+          "default": 8000,
+          "required": false
+        },
+        "cpu": {
+          "default": "256",
+          "required": false
+        },
+        "desired_count": {
+          "default": 1,
+          "required": false
+        },
+        "env": {
+          "default": {},
+          "required": false
+        },
+        "image": {
+          "required": true
+        },
+        "log_retention_days": {
+          "default": 30,
+          "required": false
+        },
+        "memory": {
+          "default": "512",
+          "required": false
+        },
+        "name": {
+          "required": true
+        },
+        "region": {
+          "default": "us-east-2",
+          "required": false
+        },
+        "running_count": {
+          "default": null,
+          "required": false
+        },
+        "security_group_id": {
+          "default": null,
+          "required": false
+        },
+        "service_arn": {
+          "default": null,
+          "required": false
+        },
+        "subnet_ids": {
+          "default": null,
+          "required": false
+        },
+        "task_definition_arn": {
+          "default": null,
+          "required": false
+        },
+        "vpc_id": {
+          "default": null,
+          "required": false
+        }
+      },
+      "isa": null,
+      "nameField": "name"
+    },
+    "EcsTaskRole": {
+      "fields": {
+        "arn": {
+          "default": null,
+          "required": false
+        },
+        "inline_policy": {
+          "default": null,
+          "required": false
+        },
+        "name": {
+          "required": true
+        },
+        "trust_policy": {
+          "default": null,
+          "required": false
+        }
+      },
+      "isa": "IAMRole",
+      "nameField": "name"
+    },
     "HostedZone": {
       "fields": {
         "domain_name": {
@@ -623,14 +913,94 @@ return {
       "isa": null,
       "nameField": "name"
     },
-    "Listener": {
+    "RDSPostgres": {
       "fields": {
+        "allocated_storage": {
+          "default": 20,
+          "required": false
+        },
         "arn": {
+          "default": null,
+          "required": false
+        },
+        "backup_retention_days": {
+          "default": 7,
+          "required": false
+        },
+        "db_name": {
+          "default": "app",
+          "required": false
+        },
+        "deletion_protection": {
+          "default": false,
+          "required": false
+        },
+        "endpoint": {
+          "default": null,
+          "required": false
+        },
+        "engine_version": {
+          "default": "16",
+          "required": false
+        },
+        "instance_class": {
+          "default": "db.t4g.micro",
+          "required": false
+        },
+        "master_user_secret_arn": {
+          "default": null,
+          "required": false
+        },
+        "multi_az": {
+          "default": false,
+          "required": false
+        },
+        "name": {
           "required": true
+        },
+        "port": {
+          "default": 5432,
+          "required": false
+        },
+        "publicly_accessible": {
+          "default": false,
+          "required": false
+        },
+        "region": {
+          "default": "us-east-2",
+          "required": false
+        },
+        "security_group_id": {
+          "default": null,
+          "required": false
+        },
+        "skip_final_snapshot": {
+          "default": false,
+          "required": false
+        },
+        "status": {
+          "default": null,
+          "required": false
+        },
+        "storage_encrypted": {
+          "default": true,
+          "required": false
+        },
+        "subnet_ids": {
+          "default": null,
+          "required": false
+        },
+        "username": {
+          "default": "postgres",
+          "required": false
+        },
+        "vpc_id": {
+          "default": null,
+          "required": false
         }
       },
       "isa": null,
-      "nameField": null
+      "nameField": "name"
     },
     "Route53AliasRecord": {
       "fields": {
@@ -688,25 +1058,6 @@ return {
       },
       "isa": null,
       "nameField": null
-    },
-    "SecurityGroup": {
-      "fields": {
-        "arn": {
-          "default": null,
-          "required": false
-        },
-        "desc": {
-          "required": true
-        },
-        "sg_id": {
-          "required": true
-        },
-        "vpc_id": {
-          "required": true
-        }
-      },
-      "isa": null,
-      "nameField": null
     }
   },
   "predicates": {
@@ -721,6 +1072,18 @@ return {
         "LambdaZipFile"
       ],
       "doc": "if the function has a public URL, Cognito auth is wired into it"
+    },
+    "cors-locked": {
+      "args": [
+        "ApiSite"
+      ],
+      "doc": "the API's CORS allow-list names real origins, never *"
+    },
+    "db-private": {
+      "args": [
+        "RDSPostgres"
+      ],
+      "doc": "the database has no public address and no open-to-the-world ingress"
     },
     "https-only": {
       "args": [

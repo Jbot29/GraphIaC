@@ -168,6 +168,12 @@ A bare node label used as a value (like `role` above) resolves to that node's
 | `LambdaZipFile`        | `DynamoTable`          | `LambdaDynamoEdge`            |
 | `SESDomainIdentity`    | `HostedZone`           | `SESDomainRoute53Edge`        |
 | `LambdaZipFile`        | `SESDomainIdentity`    | `LambdaSESEdge`               |
+| `ACMCertificate`       | `ALB`                  | `ACMCertificateALBEdge` ⊘     |
+| `ALB`                  | `HostedZone`           | `ALBRoute53Edge`              |
+| `ALB`                  | `EcsService`           | `AlbEcsEdge`                  |
+| `EcsCluster`           | `EcsService`           | `ClusterServiceEdge`          |
+| `EcsTaskRole`          | `EcsService`           | `IAMRoleEcsEdge`              |
+| `EcsService`           | `RDSPostgres`          | `EcsRdsEdge`                  |
 
 This table is not hand-maintained in two places — it is generated from the
 registry (below).
@@ -290,8 +296,9 @@ failure mode too (2am, temp outage, you need the change through). A
 `--strict` mode that blocks on failing guards is a possible future flag.
 
 Predicates are a closed set, grown as examples need them (current:
-`private`, `https-only`, `locked-to`, `admin-only-signup`, `authed`).
-Signatures live in the generated registry like everything else.
+`private`, `https-only`, `locked-to`, `admin-only-signup`, `authed`,
+`cors-locked`, `db-private`). Signatures live in the generated registry
+like everything else.
 
 ## Desugar — watching the edge dissolve
 

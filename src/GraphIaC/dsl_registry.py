@@ -42,6 +42,11 @@ NAME_FIELDS = {
     "ApiEndpoint": "endpoint_name",
     "CloudFrontFunction": "name",
     "ALB": "name",
+    "EcsCluster": "name",
+    "EcsService": "name",
+    "EcsTaskRole": "name",
+    "EcrRepository": "name",
+    "RDSPostgres": "name",
 }
 
 # edge type -> (source type, source g_id field, dest type, dest g_id field)
@@ -60,6 +65,13 @@ EDGE_ENDPOINTS = {
     "LambdaDynamoEdge": ("LambdaZipFile", "lambda_node_g_id", "DynamoTable", "dynamo_node_g_id"),
     "SESDomainRoute53Edge": ("SESDomainIdentity", "ses_g_id", "HostedZone", "zone_g_id"),
     "LambdaSESEdge": ("LambdaZipFile", "lambda_node_g_id", "SESDomainIdentity", "ses_node_g_id"),
+    # the container track
+    "ACMCertificateALBEdge": ("ACMCertificate", "cert_g_id", "ALB", "alb_g_id"),
+    "ALBRoute53Edge": ("ALB", "alb_g_id", "HostedZone", "hz_g_id"),
+    "ClusterServiceEdge": ("EcsCluster", "cluster_g_id", "EcsService", "service_g_id"),
+    "IAMRoleEcsEdge": ("EcsTaskRole", "role_g_id", "EcsService", "service_g_id"),
+    "AlbEcsEdge": ("ALB", "alb_g_id", "EcsService", "ecs_g_id"),
+    "EcsRdsEdge": ("EcsService", "ecs_g_id", "RDSPostgres", "rds_g_id"),
 }
 
 REGISTRY_JS_PATH = Path(__file__).parent / "web" / "registry.js"

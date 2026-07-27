@@ -1,0 +1,46 @@
+# Chapter 4 — the back office
+#
+#   https://<generated>.lambda-url.us-east-2.on.aws
+#     -> login page (Cognito — admin-created users only)
+#     -> your signups, in a table you can read
+#
+# One Lambda. No S3, no API Gateway, no frontend build. The static assets
+# ride inside the deployment zip and the same function serves them.
+#
+#   ./build.sh
+#   python -m GraphIaC graphiac --infra_file console.giac run
+#
+# Then make yourself a user (nobody can sign themselves up — that's the
+# point) with the pool ID printed on create:
+#
+#   aws cognito-idp admin-create-user --user-pool-id <pool_id> \
+#       --username you@yourco.com --message-action SUPPRESS --profile graphiac
+#   aws cognito-idp admin-set-user-password --user-pool-id <pool_id> \
+#       --username you@yourco.com --password '<12+ chars>' --permanent \
+#       --profile graphiac
+
+region = "us-east-2"
+
+# Chapter 3 already created this table. Declaring it here doesn't create a
+# second one — the planner reads live AWS, finds it, and IMPORTs it. Two
+# files, one table.
+signups : DynamoTable(region: region,
+                      partition_key: {name: "email", attr_type: "S"})
+
+team       : CognitoUserPool(region: region)
+team-login : CognitoUserPoolClient(password_auth: true)
+
+console-role : IAMRole
+console      : LambdaZipFile(runtime: "python3.13", handler: "app.handler",
+                             zip_file_path: "./deployment.zip", region: region,
+                             public_url: true, timeout: 15,
+                             env: {TABLE_NAME: "signups"})
+
+console-role -> console                             # basic execution policy
+team         -> team-login                          # app client (password auth)
+team-login   -> console                              # COGNITO_* env into the function
+console      -> signups : (role_g_id: console-role)  # read that table, nothing else
+
+# --- declared invariants: independent checks, never the provisioning code ---
+? admin-only-signup(team)   # nobody signs themselves into your back office
+? authed(console)           # a public URL is only allowed with auth wired in

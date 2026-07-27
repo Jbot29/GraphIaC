@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YourCo</title>
+<style>
+  :root {
+    --bg:#f7f2e6; --ink:#22304a; --muted:rgba(34,48,74,0.6); --rule:#e3d9c2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#151a24; --ink:#e8e2d4; --muted:rgba(232,226,212,0.55); --rule:#2a3140; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center;
+         background:var(--bg); color:var(--ink);
+         font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+         line-height:1.5; }
+  main { width:min(38rem, 90vw); padding:3rem 0; }
+  .mark { font-size:0.75rem; letter-spacing:0.18em; text-transform:uppercase;
+          color:var(--muted); margin:0 0 2.5rem; }
+  h1 { font-size:clamp(1.8rem, 5vw, 2.6rem); line-height:1.2; margin:0 0 1rem;
+       font-weight:600; letter-spacing:-0.02em; }
+  .lede { color:var(--muted); margin:0 0 2.5rem; font-size:1.05rem; }
+  hr { border:0; border-top:1px solid var(--rule); margin:2.5rem 0; }
+  footer { color:var(--muted); font-size:0.85rem; }
+  code { background:var(--rule); padding:0.1rem 0.4rem; border-radius:3px;
+         font-size:0.85em; }
+</style>
+</head>
+<body>
+<main>
+  <p class="mark">YourCo</p>
+
+  <h1>We're building something.</h1>
+
+  <p class="lede">
+    This page is served over HTTPS from a CloudFront distribution in front of
+    a private S3 bucket that only that distribution can read. Its certificate
+    was requested, DNS-validated, and attached without anyone touching the
+    console.
+  </p>
+
+  <hr>
+
+  <footer>
+    Declared in one <code>.giac</code> file — chapter 2 of the founding kit.
+    The signup form arrives in chapter 3.
+  </footer>
+</main>
+</body>
+</html>

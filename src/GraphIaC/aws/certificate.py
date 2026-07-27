@@ -1,4 +1,4 @@
-from typing import ClassVar, Optional
+from typing import ClassVar, List, Optional
 
 from botocore.exceptions import ClientError
 
@@ -19,8 +19,21 @@ class ACMCertificate(BaseNode):
     ]
 
     domain_name: str
+    # CloudFront can only use certificates in us-east-1, which is why that is
+    # the default. An ALB needs one in its OWN region — set this to match.
+    region: str = "us-east-1"
+    # None keeps the historical behaviour (also request www.<domain>). Pass []
+    # for a subdomain certificate, where a www. prefix is noise that still has
+    # to be DNS-validated before ACM will issue anything.
+    subject_alternative_names: Optional[List[str]] = None
     arn: Optional[str] = None
     status: Optional[str] = None  # PENDING_VALIDATION, ISSUED, FAILED, EXPIRED, etc.
+
+    @property
+    def sans(self) -> List[str]:
+        if self.subject_alternative_names is None:
+            return [f"www.{self.domain_name}"]
+        return list(self.subject_alternative_names)
 
     @property
     def read_id(self) -> Optional[str]:
@@ -35,12 +48,12 @@ class ACMCertificate(BaseNode):
     @classmethod
     def read(cls, session, G, g_id, read_id, **kwargs):
         # When called from infra.py with read_id=None, fall back to domain_name from graph
-        if not read_id and G is not None:
-            node = G.nodes.get(g_id, {}).get("data")
-            if node and hasattr(node, "domain_name"):
-                read_id = node.domain_name
+        node = G.nodes.get(g_id, {}).get("data") if G is not None else None
+        if not read_id and node is not None and hasattr(node, "domain_name"):
+            read_id = node.domain_name
 
-        acm = session.client("acm", region_name="us-east-1")
+        region = kwargs.get("region") or getattr(node, "region", None) or "us-east-1"
+        acm = session.client("acm", region_name=region)
         try:
             if read_id and read_id.startswith("arn:"):
                 resp = acm.describe_certificate(CertificateArn=read_id)
@@ -48,6 +61,7 @@ class ACMCertificate(BaseNode):
                 return cls(
                     g_id=g_id,
                     domain_name=cert["DomainName"],
+                    region=region,
                     arn=cert["CertificateArn"],
                     status=cert["Status"],
                 )
@@ -62,6 +76,7 @@ class ACMCertificate(BaseNode):
                         return cls(
                             g_id=g_id,
                             domain_name=cert["DomainName"],
+                            region=region,
                             arn=cert["CertificateArn"],
                             status=cert["Status"],
                         )
@@ -70,14 +85,16 @@ class ACMCertificate(BaseNode):
         return None
 
     def create(self, session, G):
-        acm = session.client("acm", region_name="us-east-1")
+        acm = session.client("acm", region_name=self.region)
         try:
-            resp = acm.request_certificate(
+            kwargs = dict(
                 DomainName=self.domain_name,
                 ValidationMethod="DNS",
-                SubjectAlternativeNames=[f"www.{self.domain_name}"],
                 Tags=[{"Key": "Name", "Value": f"{self.domain_name} Certificate"}],
             )
+            if self.sans:
+                kwargs["SubjectAlternativeNames"] = self.sans
+            resp = acm.request_certificate(**kwargs)
             self.arn = resp["CertificateArn"]
             self.status = "PENDING_VALIDATION"
             logger.info(f"ACM certificate requested for {self.domain_name}: {self.arn}")
@@ -110,7 +127,7 @@ class ACMCertificate(BaseNode):
     def delete(self, session, G):
         if not self.arn:
             return
-        acm = session.client("acm", region_name="us-east-1")
+        acm = session.client("acm", region_name=self.region)
         try:
             acm.delete_certificate(CertificateArn=self.arn)
             logger.info(f"Deleted ACM certificate {self.arn}")
@@ -153,7 +170,7 @@ class ACMCertificateHostedZoneEdge(BaseEdge):
 
         # Check whether the validation CNAME records already exist in Route53
         route53 = session.client("route53")
-        acm = session.client("acm", region_name="us-east-1")
+        acm = session.client("acm", region_name=cert.region)
         try:
             resp = acm.describe_certificate(CertificateArn=cert.arn)
             for option in resp["Certificate"].get("DomainValidationOptions", []):
@@ -182,7 +199,7 @@ class ACMCertificateHostedZoneEdge(BaseEdge):
             logger.warning("Certificate ARN not yet available; skipping DNS validation setup")
             return
 
-        acm = session.client("acm", region_name="us-east-1")
+        acm = session.client("acm", region_name=cert.region)
         route53 = session.client("route53")
         try:
             resp = acm.describe_certificate(CertificateArn=cert.arn)

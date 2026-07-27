@@ -1,10 +1,12 @@
 # Examples
 
-**New to GraphIaC? Start at [`get-started/`](get-started/)** — two manual
-steps and one run to create your deploy role; every other example works
-from there.
+**New to GraphIaC? Read [`founding/`](founding/)** — the founding kit: five
+chapters that take an empty AWS account to a company on the internet, in
+order, one `.giac` file each. It's the tour, and it starts with the deploy
+role every other example needs.
 
-Every example here is a complete, runnable demo — something you'd actually
+The rest of this directory is the reference shelf — one example per
+capability, standing alone. Every one is a complete, runnable demo — something you'd actually
 want at the end, not a syntax exercise. Copy the directory, change the names
 at the top of the `.giac` file, and:
 
@@ -20,6 +22,7 @@ python -m GraphIaC <aws-profile> --infra_file <file>.giac serve
 
 | example | what you end up with |
 |---|---|
+| [`founding/`](founding/) | **The founding kit, in five chapters**: the deploy role and state bucket, your domain on HTTPS, a waitlist that emails people back, a private back office over the signups — and a container track (ALB → ECS → Postgres) for when what you have is an app, not functions. |
 | [`get-started/`](get-started/) | Your deploy setup: a `graphiac-deploy` IAM role whose policy is generated from GraphIaC itself, plus an assume-role profile. GraphIaC deploying its own deployer. |
 | [`static-site/`](static-site/) | A real website: `https://your-domain` → CloudFront → private S3, DNS-validated cert, pretty URLs via a CloudFront function. Includes a starter `index.html` to publish. |
 | [`lambda-ui/`](lambda-ui/) | A serverless web app with login: one Lambda with a public URL, Cognito auth, static assets baked into the zip, and authenticated JSON APIs — add a Python function, get an endpoint. The base for internal tools (feature-flag consoles, admin panels, CRM helpers). |

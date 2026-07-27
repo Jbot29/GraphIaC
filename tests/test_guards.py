@@ -181,3 +181,27 @@ def test_locked_to_full_arc_via_run(aws, tmp_path):
     r = guards.evaluate(aws, res["graph"])
     by = {x.label: x for x in r}
     assert by["? locked-to(b, cf)"].status == "fail"
+
+
+def test_cors_locked_pending_pass_and_fail(aws):
+    """The waitlist scenario: a browser-facing API whose CORS allow-list
+    is the one thing standing between your signup endpoint and every
+    other site on the internet."""
+    src = 'api : ApiSite("guard-api", region: "us-east-2")\n? cors-locked(api)\n'
+
+    assert results_for(aws, src)["? cors-locked(api)"].status == "pending"
+
+    gw = aws.client("apigatewayv2", region_name=REGION)
+    gw.create_api(Name="guard-api", ProtocolType="HTTP",
+                  CorsConfiguration={"AllowOrigins": ["https://yourco.com"],
+                                     "AllowMethods": ["POST"]})
+    r = results_for(aws, src)["? cors-locked(api)"]
+    assert r.status == "pass"
+    assert "yourco.com" in r.message
+
+    wild = 'api : ApiSite("open-api", region: "us-east-2")\n? cors-locked(api)\n'
+    gw.create_api(Name="open-api", ProtocolType="HTTP",
+                  CorsConfiguration={"AllowOrigins": ["*"], "AllowMethods": ["POST"]})
+    r = results_for(aws, wild)["? cors-locked(api)"]
+    assert r.status == "fail"
+    assert "*" in r.message
