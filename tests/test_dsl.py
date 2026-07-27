@@ -110,3 +110,21 @@ def test_unclosed_paren_errors_with_statement_line():
     res = dsl.parse('hz : HostedZone(domain_name: "x.co"', REG)
     assert res["errors"][0]["line"] == 1
     assert "unclosed" in res["errors"][0]["msg"]
+
+
+def test_interpolation_takes_constants_not_node_labels():
+    """Deliberate: interpolation is parse-time, and a label's only value is
+    its own name — allowing it would read like a reference and not be one."""
+    src = 'bucket : S3Bucket\nfn : LambdaZipFile(name: "${bucket}-fn", runtime: "python3.13", handler: "h", zip_file_path: "z")'
+    res = dsl.parse(src, REG)
+    assert any("only constants can be interpolated" in e["msg"] for e in res["errors"])
+
+
+def test_interpolation_of_a_literal_dollar_brace_round_trips():
+    src = 'b : S3Bucket(bucket_name: "\\${x}")'
+    res = dsl.parse(src, REG)
+    assert res["errors"] == []
+    assert res["graph"]["nodes"][0]["fields"]["bucket_name"] == "${x}"
+    again = dsl.parse(dsl.desugar(res["graph"], REG), REG)
+    assert again["errors"] == []
+    assert again["graph"]["nodes"][0]["fields"]["bucket_name"] == "${x}"

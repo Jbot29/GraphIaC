@@ -18,8 +18,9 @@
 # you have verified. README.md covers getting out. Signups still work while
 # you're in it; only the confirmation email is skipped.
 
-domain    = "yourco.com"
-mail-from = "hello@yourco.com"
+company   = "yourco"
+domain    = "${company}.com"
+mail-from = "hello@${domain}"
 region    = "us-east-2"
 
 hz      : HostedZone(domain_name: domain)
@@ -34,9 +35,9 @@ signup      : LambdaZipFile(runtime: "python3.13", handler: "app.handler",
                             timeout: 10,
                             env: {TABLE_NAME: "signups",
                                   MAIL_FROM: mail-from,
-                                  SITE_URL: "https://yourco.com"})
+                                  SITE_URL: "https://${domain}"})
 
-api  : ApiSite(region: region, cors_origins: ["https://yourco.com"])
+api  : ApiSite(region: region, cors_origins: ["https://${domain}"])
 join : ApiEndpoint(method: "POST", path: "/signup")
 
 signup-role -> signup                        # basic execution + log group

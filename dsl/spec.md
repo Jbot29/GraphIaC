@@ -51,6 +51,32 @@ hz : HostedZone(domain_name: domain)
 Values are strings (`"…"`), numbers, booleans (`true` / `false`), lists
 (`[a, b]`), or maps (`{name: "id", attr_type: "S"}`).
 
+### Interpolation — one name, spelled once
+
+`"${name}"` inside a string substitutes a constant. Like the constant
+itself, this happens **at parse time**: the graph carries the finished
+string and never sees the template.
+
+```
+company = "yourco"
+domain  = "${company}.com"
+
+bucket : S3Bucket("${company}-com-site")
+api    : ApiSite(cors_origins: ["https://${domain}"])
+```
+
+- **Constants only.** Not node labels (a label's only value is its own
+  name, and allowing it would read like a reference without being one) and
+  not attribute references — `"${cert.arn}"` is an error, because
+  interpolation has to produce a value at parse time and a `$ref` has none
+  until plan. Write `cert.arn` as the whole value instead.
+- Numbers and booleans render as they would print (`8000` → `"8000"`); a
+  list or map is an error, not a formatting question.
+- `\${` is a literal `${`. `desugar` re-escapes it, so output round-trips.
+
+This is what keeps a module signature honest later: a body that can't
+build its own names from its parameters isn't parameterized.
+
 ---
 
 ## Nodes — the label is the identity
@@ -425,8 +451,17 @@ otherwise write by hand.
   (`? baseline`), and live re-evaluation badges in the sandbox diagram.
 - **Arrow chaining** (`api -> hello -> handler`) — sugar for consecutive
   edges. Cheap, but nothing forces it yet.
-- **String interpolation** (`"${domain}-site"`) — until a script repeats
-  itself painfully without it.
+- **Modules** (`define web-service(...) { … }`) — a named, parameterized
+  subgraph, expanded at parse time into the same flat nodes and edges. The
+  unit is a macro over the graph, not a class: authoring one must never
+  require importing GraphIaC, which is what sank custom node types.
+  Decided so far: instance labels prefix internal ones with `-` (`web-lb`),
+  no nesting in v1, every internal label addressable rather than declared
+  outputs, and guard statements allowed in a body — a module is a pattern
+  *plus its guarantees*, which is what distinguishes it from a construct.
+  A `use` of a file cannot work in the browser sandbox (no filesystem, and
+  expansion must happen at parse time), so a standard library would ship as
+  data in the generated registry.
 - **A global `region` lens** — one `region : us-east-2` statement that fills
   every node's unset region, the way klangbild's `tempo` resolves beats.
   Complicated by per-service defaults (SES and ACM want `us-east-1`).

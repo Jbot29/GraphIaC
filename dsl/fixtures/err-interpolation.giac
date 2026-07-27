@@ -1,0 +1,8 @@
+company = "yourco"
+things  = ["a", "b"]
+
+a : S3Bucket(bucket_name: "${nope}-x")
+b : S3Bucket(bucket_name: "${things}-x")
+c : S3Bucket(bucket_name: "${site.arn}")
+d : S3Bucket(bucket_name: "${bad name}")
+e : S3Bucket(bucket_name: "${company")

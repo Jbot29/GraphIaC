@@ -1,0 +1,14 @@
+# ${constant} interpolation — the company name is spelled once
+company = "yourco"
+domain  = "${company}.com"
+port    = 8000
+
+site : S3Bucket("${company}-com-site", region: "us-east-2")
+hz   : HostedZone(domain_name: domain)
+api  : ApiSite(site_name: "${company}-api", cors_origins: ["https://${domain}"])
+web  : LambdaZipFile(name: "${company}-web", runtime: "python3.13",
+                     handler: "app.handler", zip_file_path: "./deployment.zip",
+                     env: {PORT: "${port}", HOST: "${domain}"})
+
+# a backslash escapes it — this one stays a literal ${company}
+lit : S3Bucket(bucket_name: "\${company}-literal")

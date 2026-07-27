@@ -1,0 +1,60 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "site",
+        "type": "S3Bucket",
+        "fields": {
+          "bucket_name": "yourco-com-site",
+          "region": "us-east-2"
+        },
+        "line": 6
+      },
+      {
+        "g_id": "hz",
+        "type": "HostedZone",
+        "fields": {
+          "domain_name": "yourco.com"
+        },
+        "line": 7
+      },
+      {
+        "g_id": "api",
+        "type": "ApiSite",
+        "fields": {
+          "site_name": "yourco-api",
+          "cors_origins": [
+            "https://yourco.com"
+          ]
+        },
+        "line": 8
+      },
+      {
+        "g_id": "web",
+        "type": "LambdaZipFile",
+        "fields": {
+          "name": "yourco-web",
+          "runtime": "python3.13",
+          "handler": "app.handler",
+          "zip_file_path": "./deployment.zip",
+          "env": {
+            "PORT": "8000",
+            "HOST": "yourco.com"
+          }
+        },
+        "line": 9
+      },
+      {
+        "g_id": "lit",
+        "type": "S3Bucket",
+        "fields": {
+          "bucket_name": "${company}-literal"
+        },
+        "line": 14
+      }
+    ],
+    "edges": [],
+    "guards": []
+  },
+  "errors": []
+}

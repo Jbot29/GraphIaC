@@ -91,6 +91,25 @@ function indexTopLevel(text, tok) {
   return -1;
 }
 
+function badInterpName(raw) {
+  // the obvious thing to try, and it can't work: interpolation happens at
+  // parse time, and an attribute reference has no value until plan
+  if (raw.includes(".")) {
+    return `attribute references cannot be interpolated — write ${raw} as the whole value, not inside a string`;
+  }
+  return `bad name "${raw}" in \${...}`;
+}
+
+// A constant rendered into a string, or null if it has no sensible
+// rendering (interpolating a list into a name is a mistake, not a
+// formatting question).
+function interpStr(val) {
+  if (typeof val === "boolean") return val ? "true" : "false";
+  if (typeof val === "number") return String(val);
+  if (typeof val === "string") return val;
+  return null;
+}
+
 /* ---------------------------------------------------------------------
  * Value scanner — strings, numbers, booleans, lists, maps, identifiers,
  * and dotted attribute references (other.field). Returns TAGGED values;
@@ -110,14 +129,35 @@ function makeScanner(s, ln, err) {
     return m[0];
   }
 
+  // A string literal, with `${constant}` interpolation. A string containing
+  // no `${` produces the same plain "str" token it always did; only an
+  // interpolated one becomes "interp", whose parts are literal chunks and
+  // {name} placeholders resolved against the constants at parse time.
+  // `\${` escapes an interpolation.
   function string() {
     i++; // opening quote
-    let v = "";
+    const parts = [];
+    let buf = "";
     while (i < s.length) {
       const c = s[i];
-      if (c === "\\" && i + 1 < s.length) { v += s[i + 1]; i += 2; continue; }
-      if (c === '"') { i++; return { t: "str", v }; }
-      v += c; i++;
+      if (c === "\\" && i + 1 < s.length) { buf += s[i + 1]; i += 2; continue; }
+      if (c === '"') {
+        i++;
+        if (!parts.length) return { t: "str", v: buf };
+        if (buf) parts.push(buf);
+        return { t: "interp", parts };
+      }
+      if (c === "$" && s[i + 1] === "{") {
+        const close = s.indexOf("}", i + 2);
+        if (close < 0) { err(ln, "unterminated ${ in string"); return null; }
+        const name = s.slice(i + 2, close).trim();
+        if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(name)) { err(ln, badInterpName(name)); return null; }
+        if (buf) { parts.push(buf); buf = ""; }
+        parts.push({ name });
+        i = close + 1;
+        continue;
+      }
+      buf += c; i++;
     }
     err(ln, "unterminated string");
     return null;
@@ -309,6 +349,23 @@ function parse(src, registry) {
         for (const [k, e] of Object.entries(v.v)) { const r = resolve(e, ln, env); if (r === undefined) return undefined; out[k] = r; }
         return out;
       }
+      case "interp": {
+        let out = "";
+        for (const p of v.parts) {
+          if (typeof p === "string") { out += p; continue; }
+          if (!env.consts.has(p.name)) {
+            err(ln, `unknown name "${p.name}" in \${...} — only constants can be interpolated`);
+            return undefined;
+          }
+          const rendered = interpStr(env.consts.get(p.name));
+          if (rendered === null) {
+            err(ln, `cannot interpolate "${p.name}" — only strings, numbers, and booleans`);
+            return undefined;
+          }
+          out += rendered;
+        }
+        return out;
+      }
       case "fileval":
         // stays symbolic — the ENGINE reads the file at load time, relative
         // to the source file; the browser only needs the reference
@@ -481,7 +538,9 @@ function parse(src, registry) {
  * ------------------------------------------------------------------- */
 function fmtValue(v) {
   if (v === null) return "null";
-  if (typeof v === "string") return JSON.stringify(v);
+  // ${ is escaped so desugar output re-parses to this same string rather
+  // than to an interpolation of it
+  if (typeof v === "string") return JSON.stringify(v).replace(/\$\{/g, "\\${");
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   if (Array.isArray(v)) return "[" + v.map(fmtValue).join(", ") + "]";
   if (typeof v === "object" && v.$ref) return `${v.$ref.g_id}.${v.$ref.field}`;

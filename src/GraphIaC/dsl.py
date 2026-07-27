@@ -16,6 +16,7 @@ See dsl/spec.md for the language. In one line each:
     a -> b                 an edge — type inferred from the node-type pair;
                            `: Type(args)` makes it explicit
     name = value           a constant, substituted at parse time
+    "${name}-web"          a constant interpolated into a string
     other.field            an attribute reference ($ref) — a data
                            dependency the planner resolves from live state
     #                      a comment
@@ -39,6 +40,25 @@ NUM_AT = re.compile(r"[+-]?(\d+\.?\d*|\.\d+)")
 
 
 _FAIL = object()  # sentinel: a value that failed to resolve (None is a real value)
+
+
+def _bad_interp_name(raw):
+    if "." in raw:
+        # the obvious thing to try, and it can't work: interpolation happens
+        # at parse time, and an attribute reference has no value until plan
+        return f'attribute references cannot be interpolated — write {raw} as the whole value, not inside a string'
+    return f'bad name "{raw}" in ${{...}}'
+
+
+def _interp_str(val):
+    """A constant rendered into a string, or None if it has no sensible
+    rendering (interpolating a list into a name is a mistake, not a
+    formatting question)."""
+    if isinstance(val, bool):
+        return "true" if val else "false"
+    if isinstance(val, (int, float, str)):
+        return str(val)
+    return None
 
 
 def _clip(s):
@@ -161,18 +181,44 @@ class _Scanner:
         return m.group(0)
 
     def _string(self):
+        """A string literal, with `${constant}` interpolation.
+
+        A string containing no `${` produces the same plain "str" token it
+        always did; only an interpolated one becomes "interp", whose parts
+        are literal chunks and {"name": …} placeholders resolved against the
+        constants at parse time. `\\${` escapes an interpolation.
+        """
         self.i += 1  # opening quote
-        v = ""
+        parts, buf = [], ""
         while self.i < len(self.s):
             c = self.s[self.i]
             if c == "\\" and self.i + 1 < len(self.s):
-                v += self.s[self.i + 1]
+                buf += self.s[self.i + 1]
                 self.i += 2
                 continue
             if c == '"':
                 self.i += 1
-                return {"t": "str", "v": v}
-            v += c
+                if not parts:
+                    return {"t": "str", "v": buf}
+                if buf:
+                    parts.append(buf)
+                return {"t": "interp", "parts": parts}
+            if c == "$" and self.s[self.i + 1 : self.i + 2] == "{":
+                close = self.s.find("}", self.i + 2)
+                if close < 0:
+                    self.err(self.ln, "unterminated ${ in string")
+                    return None
+                name = self.s[self.i + 2 : close].strip()
+                if not IDENT.match(name):
+                    self.err(self.ln, _bad_interp_name(name))
+                    return None
+                if buf:
+                    parts.append(buf)
+                    buf = ""
+                parts.append({"name": name})
+                self.i = close + 1
+                continue
+            buf += c
             self.i += 1
         self.err(self.ln, "unterminated string")
         return None
@@ -376,6 +422,22 @@ def parse(src, registry=None):
                 if r is _FAIL:
                     return _FAIL
                 out[k] = r
+            return out
+        if t == "interp":
+            out = ""
+            for p in v["parts"]:
+                if isinstance(p, str):
+                    out += p
+                    continue
+                name = p["name"]
+                if name not in consts:
+                    err(ln, f'unknown name "{name}" in ${{...}} — only constants can be interpolated')
+                    return _FAIL
+                rendered = _interp_str(consts[name])
+                if rendered is None:
+                    err(ln, f'cannot interpolate "{name}" — only strings, numbers, and booleans')
+                    return _FAIL
+                out += rendered
             return out
         if t == "fileval":
             # stays symbolic — load_graph reads the file, relative to the
@@ -628,7 +690,9 @@ def _fmt_value(v):
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, str):
-        return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        # ${ is escaped so desugar output re-parses to this same string
+        # rather than to an interpolation of it
+        return '"' + v.replace("\\", "\\\\").replace('"', '\\"').replace("${", "\\${") + '"'
     if isinstance(v, (int, float)):
         return str(v)
     if isinstance(v, list):
