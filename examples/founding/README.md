@@ -17,6 +17,12 @@ chapter 5   or: a web server and a Postgres database, if that's what you have
 Read them in order the first time. Every chapter's README ends by telling
 you where to go next.
 
+After that, treat it as a runbook rather than a tutorial. These five are the
+patterns almost every company builds in its first year, and they are meant
+to be copied, renamed, and stacked — not read once and admired. The goal is
+that "put a database behind my app" stops being a day of reading IAM
+documentation and becomes a line you write.
+
 ---
 
 ## Choose your adventure
@@ -104,17 +110,41 @@ Every chapter ends with a few lines starting with `?`:
 ```
 
 The scariest failure mode of infrastructure you built yourself is leaving
-something open to the internet and not knowing. A guard is an invariant
-declared next to the thing it protects, checked against live AWS by
-`verify`, exiting non-zero when it fails — so it's also a CI check, and a
-cron job, and the thing that tells you somebody changed a setting in the
-console at 2am.
+something open to the internet and not knowing.
 
-Crucially the predicates are **independent code**: raw boto3 in
-`guards.py`, forbidden from calling the classes that did the provisioning.
-The auditor doesn't share a bug with the builder.
+**A guard checks reality, not your intent.** That's the whole difference,
+and it's worth being precise about it, because there are already tools in
+this space and they answer a different question. Checkov reads your HCL.
+OPA and Sentinel read the plan JSON. All three are asking *"does the code
+you wrote describe something safe?"* — a real question, but not the one
+that keeps you up. None of them ever talks to AWS, so none of them can
+notice that somebody clicked a checkbox in the console at 2am, or that a
+teammate widened a bucket policy by hand to unblock a demo, or that the
+thing you shipped in March quietly stopped matching the thing you wrote.
 
-Guards warn; they never block a run. Being locked out of your own account
+`verify` talks to AWS. It reads the live bucket, the live distribution, the
+live security group, and tells you what is true right now.
+
+And it does it with **independent code**. The predicates in `guards.py` are
+raw boto3 and are forbidden from calling the node and edge classes that did
+the provisioning. Builder and auditor share vocabulary, not
+implementation — so a bug in `CloudFrontS3OACEdge` cannot also be the bug
+that makes `? locked-to(bucket, cf)` pass. Most infrastructure tools grade
+their own homework.
+
+The last part is where it lives. The invariant sits in the same forty-line
+file as the thing it protects — not in a policy repo owned by a platform
+team you file tickets with. For a company of three people that's the
+difference between having a security review and not having one.
+
+`verify` exits non-zero on failure, so the same line is a CI gate and a
+cron job:
+
+```bash
+python -m GraphIaC graphiac --infra_file site.giac verify
+```
+
+Guards warn; they never block a `run`. Being locked out of your own account
 at 2am is a failure mode too.
 
 ---
