@@ -1,252 +1,436 @@
-from typing import List, Optional
+"""Application Load Balancer — the public front door for a container app.
 
-import boto3
+The node owns three things AWS treats separately: the load balancer, its
+security group (80 and 443 from the internet, nothing else), and an HTTP
+listener. The listener's default action is a 503 until something is wired
+behind it — an ALB with no target group is a 503 either way, and this makes
+it a deliberate one.
+
+Two edges finish the job:
+
+    cert -> alb    ACMCertificateALBEdge — the HTTPS listener, and a 301
+                   from :80. Gates the ALB until the certificate is ISSUED.
+    alb  -> hz     ALBRoute53Edge — an A alias record at your domain.
+
+The target group and the "let the load balancer reach the tasks" rule
+belong to `alb -> app` (see aws/ecs.py) — they are about the relationship,
+not about the load balancer.
+"""
+
+from typing import ClassVar, List, Optional
+
 from botocore.exceptions import ClientError
 
-from GraphIaC.models import BaseNode
+from GraphIaC.models import BaseEdge, BaseNode, VerifyResult
+
+from ...logs import setup_logger
+from ..types import AwsName
+from .network import (
+    NETWORK_ACTIONS,
+    delete_security_group,
+    ensure_ingress,
+    ensure_security_group,
+    resolve_network,
+)
+
+logger = setup_logger()
+
+ELB_ACTIONS = [
+    "elasticloadbalancing:CreateLoadBalancer",
+    "elasticloadbalancing:DescribeLoadBalancers",
+    "elasticloadbalancing:DeleteLoadBalancer",
+    "elasticloadbalancing:SetSubnets",
+    "elasticloadbalancing:CreateListener",
+    "elasticloadbalancing:DescribeListeners",
+    "elasticloadbalancing:ModifyListener",
+    "elasticloadbalancing:DeleteListener",
+    "elasticloadbalancing:AddTags",
+    "elasticloadbalancing:DescribeTags",
+]
+
+# Sent when a request arrives before anything is wired behind the listener.
+NOTHING_BEHIND_ME = {
+    "Type": "fixed-response",
+    "FixedResponseConfig": {
+        "StatusCode": "503",
+        "ContentType": "text/plain",
+        "MessageBody": "no service attached to this load balancer yet\n",
+    },
+}
+
+REDIRECT_TO_HTTPS = {
+    "Type": "redirect",
+    "RedirectConfig": {
+        "Protocol": "HTTPS",
+        "Port": "443",
+        "StatusCode": "HTTP_301",
+    },
+}
+
+
+def _listener_on(session, region, lb_arn, port):
+    """The listener on a given port, or None. Raw describe — no caching,
+    because listeners are edited by two different edges."""
+    elb = session.client("elbv2", region_name=region)
+    try:
+        listeners = elb.describe_listeners(LoadBalancerArn=lb_arn)["Listeners"]
+    except ClientError:
+        return None
+    for listener in listeners:
+        if listener.get("Port") == port:
+            return listener
+    return None
 
 
 class ALB(BaseNode):
-    name: str
-    desc: Optional[str] = ""
-    subnets: List[str]
-    # sg_id: str
-    arn: Optional[str] = None
-    region: str = "us-east-1"
+    deploy_actions: ClassVar[list] = ELB_ACTIONS + NETWORK_ACTIONS
 
-    def create(self, session, G):
-        return True
+    name: AwsName
+    region: str = "us-east-2"
+    scheme: str = "internet-facing"
+
+    # Unset means "the default VPC and all of its subnets" — see network.py.
+    vpc_id: Optional[str] = None
+    subnet_ids: Optional[List[str]] = None
+
+    # populated by AWS
+    arn: Optional[str] = None
+    dns_name: Optional[str] = None
+    canonical_hosted_zone_id: Optional[str] = None
+    security_group_id: Optional[str] = None
+    state: Optional[str] = None
 
     @property
     def read_id(self) -> Optional[str]:
         return self.name
 
-    @classmethod
-    def read(self, session, G, g_id, read_id):
-        lb = read_alb(session, read_id, region_name=self.region)
-        # Collect subnets from the 'AvailabilityZones' list
-        subnets = [az["SubnetId"] for az in lb.get("AvailabilityZones", [])]
+    def ready(self) -> bool:
+        """An ALB is 'provisioning' for a minute or two after creation and
+        cannot serve traffic until it is active."""
+        return self.state == "active"
 
-        return ALB(
+    @property
+    def sg_name(self) -> str:
+        return f"{self.name}-alb-sg"
+
+    @classmethod
+    def read(cls, session, G, g_id, read_id, **kwargs):
+        node = G.nodes.get(g_id, {}).get("data")
+        region = kwargs.get("region") or getattr(node, "region", None) or "us-east-2"
+        elb = session.client("elbv2", region_name=region)
+        try:
+            lbs = elb.describe_load_balancers(Names=[read_id])["LoadBalancers"]
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("LoadBalancerNotFound", "ValidationError"):
+                return None
+            raise
+        if not lbs:
+            return None
+        lb = lbs[0]
+        sgs = lb.get("SecurityGroups") or []
+        return cls(
             g_id=g_id,
-            # "LoadBalancerName" from the AWS response
-            name=lb["LoadBalancerName"],
-            # scheme=lb["Scheme"],
-            # type=lb["Type"],
-            # ip_address_type=lb["IpAddressType"],
-            subnets=subnets,
-            # security_groups=security_groups,
+            name=read_id,
+            region=region,
+            scheme=lb.get("Scheme", "internet-facing"),
+            vpc_id=lb.get("VpcId"),
+            subnet_ids=[az["SubnetId"] for az in lb.get("AvailabilityZones", [])],
             arn=lb["LoadBalancerArn"],
-            # dns_name=lb["DNSName"],
-            # canonical_hosted_zone_id=lb["CanonicalHostedZoneId"],
-            # created_time=lb["CreatedTime"],  # Boto3 returns a datetime object
-            # vpc_id=lb["VpcId"],
-            # state=lb["State"]["Code"] if lb.get("State") else None,
+            dns_name=lb.get("DNSName"),
+            canonical_hosted_zone_id=lb.get("CanonicalHostedZoneId"),
+            security_group_id=sgs[0] if sgs else None,
+            state=(lb.get("State") or {}).get("Code"),
         )
 
-    def update(self, session, G):
+    def create(self, session, G):
+        vpc_id, subnet_ids = resolve_network(session, self.region, self.vpc_id, self.subnet_ids)
+        if not vpc_id or len(subnet_ids) < 2:
+            logger.error(
+                f"ALB {self.name} needs subnets in at least two availability zones "
+                f"(found {len(subnet_ids)} in {vpc_id or 'no vpc'})"
+            )
+            return False
+        self.vpc_id, self.subnet_ids = vpc_id, subnet_ids
+
+        # The load balancer's own group: the public half of the stack, and
+        # the only thing here that faces the internet.
+        self.security_group_id = ensure_security_group(
+            session, self.region, self.sg_name,
+            f"GraphIaC: public ingress for {self.name}", vpc_id,
+        )
+        for port in (80, 443):
+            ensure_ingress(session, self.region, self.security_group_id, port,
+                           cidr="0.0.0.0/0", description="public web traffic")
+
+        elb = session.client("elbv2", region_name=self.region)
+        resp = elb.create_load_balancer(
+            Name=self.name,
+            Subnets=subnet_ids,
+            SecurityGroups=[self.security_group_id],
+            Scheme=self.scheme,
+            Type="application",
+            IpAddressType="ipv4",
+            Tags=[{"Key": "ManagedBy", "Value": "GraphIaC"}],
+        )
+        lb = resp["LoadBalancers"][0]
+        self.arn = lb["LoadBalancerArn"]
+        self.dns_name = lb.get("DNSName")
+        self.canonical_hosted_zone_id = lb.get("CanonicalHostedZoneId")
+        self.state = (lb.get("State") or {}).get("Code")
+
+        elb.create_listener(
+            LoadBalancerArn=self.arn,
+            Protocol="HTTP",
+            Port=80,
+            DefaultActions=[NOTHING_BEHIND_ME],
+        )
+        logger.info(f"Created ALB {self.name} at {self.dns_name} (state: {self.state})")
         return True
 
+    def update(self, session, G, diff=None):
+        """Subnets are the only field worth reconciling in place — name and
+        scheme changes are a replacement in AWS, not an update."""
+        if not (self.arn and self.subnet_ids):
+            return
+        elb = session.client("elbv2", region_name=self.region)
+        elb.set_subnets(LoadBalancerArn=self.arn, Subnets=self.subnet_ids)
 
-"""
-    name: str = Field(..., description="The name of the ALB.")
-    scheme: str = Field("internet-facing", description="Either 'internet-facing' or 'internal'.")
-    type: str = Field("application", description="For ALB, typically 'application'.")
-    ip_address_type: str = Field("ipv4", description="Either 'ipv4' or 'dualstack'.")
-    subnets: List[str] = Field(..., description="List of subnet IDs (in at least 2 AZs).")
-    security_groups: List[str] = Field(
-        default_factory=list, 
-        description="Security group IDs associated with the ALB."
-    )
-    
-    # Returned by AWS
-    load_balancer_arn: Optional[str] = Field(None, description="ARN of the ALB.")
-    dns_name: Optional[str] = Field(None, description="DNS name of the ALB.")
-    canonical_hosted_zone_id: Optional[str] = Field(None, description="Hosted zone ID for the ALB's DNS name.")
-    created_time: Optional[datetime] = Field(None, description="Creation timestamp from AWS.")
-    vpc_id: Optional[str] = Field(None, description="VPC ID where the ALB resides.")
-    state: Optional[str] = Field(None, description="Current state, e.g. 'active', 'provisioning', 'failed'.")
+    def delete(self, session, G):
+        elb = session.client("elbv2", region_name=self.region)
+        if self.arn:
+            try:
+                elb.delete_load_balancer(LoadBalancerArn=self.arn)
+                logger.info(f"Deleted ALB {self.name}")
+            except ClientError as e:
+                logger.error(f"Could not delete ALB {self.name}: {e}")
+        # The ENIs behind the load balancer take a moment to disappear, and
+        # the group can't go until they have — delete_security_group warns
+        # rather than raising when that race bites.
+        if self.security_group_id:
+            delete_security_group(session, self.region, self.security_group_id)
 
+    def verify(self, session, G) -> list:
+        live = self.read(session, G, self.g_id, self.name, region=self.region)
+        if not live:
+            return [VerifyResult(name=f"alb:{self.name}", passed=False,
+                                 message="load balancer does not exist")]
 
-"""
+        results = [VerifyResult(
+            name=f"alb:{self.name}:active", passed=live.state == "active",
+            message=f"state is {live.state}",
+        )]
 
+        https = _listener_on(session, self.region, live.arn, 443)
+        results.append(VerifyResult(
+            name=f"alb:{self.name}:https", passed=bool(https),
+            message="HTTPS listener on 443" if https else "no HTTPS listener — traffic is plaintext",
+        ))
 
-def create_alb(session, alb, region="us-east-1"):
-    elb = session.client("elbv2", region_name=region)
-    response = elb.create_load_balancer(
-        Name=alb.id,
-        Subnets=alb.subnets,
-        SecurityGroups=[alb.sg_id],
-        Scheme="internet-facing",
-        Tags=[{"Key": "Name", "Value": "my-alb"}],
-        Type="application",
-        IpAddressType="ipv4",
-    )
-
-    load_balancer_arn = response["LoadBalancers"][0]["LoadBalancerArn"]
-    print(f"ALB ARN: {load_balancer_arn}")
-
-
-def create_alb_for_lambda(
-    load_balancer_name: str,
-    subnets: list[str],
-    security_groups: list[str],
-    lambda_arn: str,
-    vpc_id: str,
-    region_name: str = "us-east-1",
-):
-    """
-    Creates an internet-facing Application Load Balancer in the specified subnets,
-    a target group of type 'lambda', and sets up a listener forwarding to the Lambda.
-
-    :param load_balancer_name: Name of the ALB (must be unique within the region/account).
-    :param subnets: List of subnet IDs for the ALB. Typically 2+ subnets in different AZs.
-    :param security_groups: List of security group IDs for the ALB.
-    :param lambda_arn: ARN of your Lambda function (e.g. "arn:aws:lambda:us-east-1:123456789012:function:MyLambda").
-    :param vpc_id: The ID of the VPC where the ALB should be created.
-    :param region_name: AWS region (e.g., "us-east-1").
-    :return: Dictionary with information about the created resources.
-    """
-
-    # ---------------------------------------------
-    # 1) Create the Load Balancer
-    # ---------------------------------------------
-    elbv2 = boto3.client("elbv2", region_name=region_name)
-
-    print(f"Creating ALB: {load_balancer_name} ...")
-    lb_response = elbv2.create_load_balancer(
-        Name=load_balancer_name,
-        Subnets=subnets,
-        SecurityGroups=security_groups,
-        Scheme="internet-facing",  # or 'internal' for private
-        IpAddressType="ipv4",
-        Type="application",
-    )
-    load_balancer_arn = lb_response["LoadBalancers"][0]["LoadBalancerArn"]
-    print(f"Created ALB ARN: {load_balancer_arn}")
-
-    # ---------------------------------------------
-    # 2) Create Target Group of type 'lambda'
-    # ---------------------------------------------
-    target_group_name = f"{load_balancer_name}-tg-lambda"
-    print(f"Creating Lambda Target Group: {target_group_name} ...")
-    tg_response = elbv2.create_target_group(
-        Name=target_group_name,
-        TargetType="lambda",
-        # For a Lambda target group, you still specify Protocol/Port,
-        # but they won't be used in the same way as instance targets.
-        Protocol="HTTP",
-        Port=80,
-        VpcId=vpc_id,
-    )
-    target_group_arn = tg_response["TargetGroups"][0]["TargetGroupArn"]
-    print(f"Created Target Group ARN: {target_group_arn}")
-
-    # ---------------------------------------------
-    # 3) Register the Lambda as a target
-    # ---------------------------------------------
-    print("Registering Lambda function as target...")
-    elbv2.register_targets(TargetGroupArn=target_group_arn, Targets=[{"Id": lambda_arn}])
-    print("Lambda successfully registered with target group.")
-
-    # ---------------------------------------------
-    # 4) Create a Listener (HTTP on Port 80)
-    # ---------------------------------------------
-    print("Creating Listener on port 80 ...")
-    listener_response = elbv2.create_listener(
-        LoadBalancerArn=load_balancer_arn,
-        Protocol="HTTP",
-        Port=80,
-        DefaultActions=[{"Type": "forward", "TargetGroupArn": target_group_arn}],
-    )
-    listener_arn = listener_response["Listeners"][0]["ListenerArn"]
-    print(f"Created Listener ARN: {listener_arn}")
-
-    # ---------------------------------------------
-    # 5) Add permission so ALB can invoke Lambda
-    # ---------------------------------------------
-    print("Adding permission to Lambda for ALB invocation ...")
-    lambda_client = boto3.client("lambda", region_name=region_name)
-
-    # We add a resource policy statement allowing 'elasticloadbalancing.amazonaws.com'
-    # to invoke this Lambda, with the SourceArn = target group's ARN.
-    statement_id = "AllowInvocationFromALB"
-    function_name = lambda_arn  # can also be partial ARN or name, but full ARN is fine
-
-    # If there's already a statement with the same ID, it fails. We'll handle gracefully:
-    try:
-        lambda_client.add_permission(
-            FunctionName=function_name,
-            StatementId=statement_id,
-            Action="lambda:InvokeFunction",
-            Principal="elasticloadbalancing.amazonaws.com",
-            SourceArn=target_group_arn,
+        http = _listener_on(session, self.region, live.arn, 80)
+        redirects = bool(http) and any(
+            a.get("Type") == "redirect" for a in http.get("DefaultActions", [])
         )
-        print("Successfully added permission to Lambda.")
-    except lambda_client.exceptions.ResourceConflictException:
-        print("Permission already exists on the Lambda function. Skipping.")
-
-    return {
-        "LoadBalancerArn": load_balancer_arn,
-        "TargetGroupArn": target_group_arn,
-        "ListenerArn": listener_arn,
-    }
+        results.append(VerifyResult(
+            name=f"alb:{self.name}:http-redirect",
+            # Nothing to redirect to until there is an HTTPS listener.
+            passed=redirects or not https,
+            message="port 80 redirects to HTTPS" if redirects else "port 80 serves plaintext",
+        ))
+        return results
 
 
-# ---------------------------------------------------------
-# Usage Example
-# ---------------------------------------------------------
+class ACMCertificateALBEdge(BaseEdge):
+    """The HTTPS listener, and the 301 that makes port 80 pointless.
 
-# You'll need your own AWS credentials or a profile set up
-# Possibly: session = boto3.Session(profile_name="myProfile")
-
-#    load_balancer_name = "my-lambda-alb"
-#    subnets = ["subnet-abc123456", "subnet-def789012"]   # At least two subnets in different AZs
-#    security_groups = ["sg-0123abcdef"]                  # Security group for the ALB
-#    lambda_arn = "arn:aws:lambda:us-east-1:123456789012:function:MyFastAPILambda"
-#    vpc_id = "vpc-0123abc456def7890"
-
-#    create_alb_for_lambda(
-#        load_balancer_name=load_balancer_name,
-#        subnets=subnets,
-#        security_groups=security_groups,
-#        lambda_arn=lambda_arn,
-#        vpc_id=vpc_id,
-#        region_name="us-east-1"
-#    )
-
-
-def read_alb(session, alb_name, region_name="us-east-1"):
+    Gating: an ALB cannot serve HTTPS with a certificate that is still
+    PENDING_VALIDATION, so the whole load balancer waits for ISSUED rather
+    than coming up as a plaintext endpoint in the meantime.
     """
-    Reads an ALB configuration from AWS and returns an ApplicationLoadBalancer model.
 
-    :param alb_identifier: The ALB name or ARN. If it starts with 'arn:aws:',
-                          we'll assume it's an ARN; otherwise, it's treated as a name.
-    :param region_name: AWS region where the ALB resides.
-    :return: ApplicationLoadBalancer model with fields populated from AWS.
-    :raises RuntimeError: If the ALB is not found or multiple ALBs match.
+    deploy_actions: ClassVar[list] = [
+        "elasticloadbalancing:CreateListener",
+        "elasticloadbalancing:DescribeListeners",
+        "elasticloadbalancing:ModifyListener",
+        "elasticloadbalancing:DeleteListener",
+        "acm:DescribeCertificate",
+    ]
+
+    gates_destination: ClassVar[bool] = True
+
+    cert_g_id: str
+    alb_g_id: str
+
+    @property
+    def source_g_id(self) -> str:
+        return self.cert_g_id
+
+    @property
+    def destination_g_id(self) -> str:
+        return self.alb_g_id
+
+    def read(self, session, G):
+        alb = G.nodes[self.alb_g_id]["data"]
+        cert = G.nodes[self.cert_g_id]["data"]
+        if not alb.arn or not cert.arn:
+            return None
+        listener = _listener_on(session, alb.region, alb.arn, 443)
+        if not listener:
+            return None
+        attached = {c["CertificateArn"] for c in listener.get("Certificates", [])}
+        return self if cert.arn in attached else None
+
+    def create(self, session, G):
+        alb = G.nodes[self.alb_g_id]["data"]
+        cert = G.nodes[self.cert_g_id]["data"]
+        if not alb.arn or not cert.arn:
+            logger.warning("ALB or certificate ARN not available yet; skipping HTTPS listener")
+            return False
+
+        elb = session.client("elbv2", region_name=alb.region)
+
+        # Whatever port 80 currently forwards to is what HTTPS should
+        # forward to — otherwise attaching a certificate would take the site
+        # down until `alb -> app` ran again.
+        http = _listener_on(session, alb.region, alb.arn, 80)
+        default = NOTHING_BEHIND_ME
+        if http:
+            forwards = [a for a in http.get("DefaultActions", []) if a.get("Type") == "forward"]
+            if forwards:
+                default = {"Type": "forward", "TargetGroupArn": forwards[0]["TargetGroupArn"]}
+
+        https = _listener_on(session, alb.region, alb.arn, 443)
+        if https:
+            elb.modify_listener(ListenerArn=https["ListenerArn"],
+                                Certificates=[{"CertificateArn": cert.arn}])
+        else:
+            elb.create_listener(
+                LoadBalancerArn=alb.arn,
+                Protocol="HTTPS",
+                Port=443,
+                SslPolicy="ELBSecurityPolicy-TLS13-1-2-2021-06",
+                Certificates=[{"CertificateArn": cert.arn}],
+                DefaultActions=[default],
+            )
+            logger.info(f"Created HTTPS listener on {alb.name}")
+
+        if http:
+            elb.modify_listener(ListenerArn=http["ListenerArn"],
+                                DefaultActions=[REDIRECT_TO_HTTPS])
+            logger.info(f"Port 80 on {alb.name} now redirects to HTTPS")
+        return True
+
+    def update(self, session, G, diff=None):
+        return self.create(session, G)
+
+    def delete(self, session, G):
+        alb = G.nodes[self.alb_g_id]["data"]
+        if not alb.arn:
+            return
+        elb = session.client("elbv2", region_name=alb.region)
+        https = _listener_on(session, alb.region, alb.arn, 443)
+        if https:
+            elb.delete_listener(ListenerArn=https["ListenerArn"])
+        http = _listener_on(session, alb.region, alb.arn, 80)
+        if http:
+            elb.modify_listener(ListenerArn=http["ListenerArn"],
+                                DefaultActions=[NOTHING_BEHIND_ME])
+
+    def verify(self, session, G) -> list:
+        alb = G.nodes[self.alb_g_id]["data"]
+        if not alb.arn:
+            return []
+        listener = _listener_on(session, alb.region, alb.arn, 443)
+        if not listener:
+            return [VerifyResult(name=f"alb:{alb.name}:tls", passed=False,
+                                 message="no HTTPS listener")]
+        policy = listener.get("SslPolicy", "")
+        return [VerifyResult(
+            name=f"alb:{alb.name}:tls", passed="TLS13" in policy or "TLS-1-2" in policy,
+            message=f"ssl policy {policy}",
+        )]
+
+
+class ALBRoute53Edge(BaseEdge):
+    """An A alias record pointing a domain at the load balancer.
+
+    Reads the ALB's DNS name and canonical hosted zone from the graph at
+    create() time, so it works in the same run that created the ALB.
     """
-    elbv2 = session.client("elbv2", region_name=region_name)
 
-    # Decide whether it's an ARN or Name
-    if alb_name.startswith("arn:aws:"):
-        describe_args = {"LoadBalancerArns": [alb_name]}
-    else:
-        describe_args = {"Names": [alb_name]}
+    deploy_actions: ClassVar[list] = [
+        "route53:ChangeResourceRecordSets",
+        "route53:ListResourceRecordSets",
+        "elasticloadbalancing:DescribeLoadBalancers",
+    ]
 
-    try:
-        response = elbv2.describe_load_balancers(**describe_args)
-    except ClientError as e:
-        raise RuntimeError(f"Error describing ALB '{alb_name}': {e}")
+    alb_g_id: str
+    hz_g_id: str
+    domain_name: str
 
-    load_balancers = response.get("LoadBalancers", [])
-    if not load_balancers:
-        raise RuntimeError(f"No ALB found with identifier: {alb_name}")
-    if len(load_balancers) > 1:
-        raise RuntimeError(
-            f"Multiple ALBs returned for identifier '{alb_name}', please be more specific."
+    @property
+    def source_g_id(self) -> str:
+        return self.alb_g_id
+
+    @property
+    def destination_g_id(self) -> str:
+        return self.hz_g_id
+
+    def _alias(self, alb):
+        return {
+            "HostedZoneId": alb.canonical_hosted_zone_id,
+            "DNSName": alb.dns_name,
+            "EvaluateTargetHealth": True,
+        }
+
+    def read(self, session, G):
+        alb = G.nodes[self.alb_g_id]["data"]
+        hz = G.nodes[self.hz_g_id]["data"]
+        if not alb.dns_name or not hz.zone_id:
+            return None
+        route53 = session.client("route53")
+        try:
+            resp = route53.list_resource_record_sets(
+                HostedZoneId=hz.zone_id, StartRecordName=self.domain_name,
+                StartRecordType="A", MaxItems="1",
+            )
+        except ClientError as e:
+            logger.error(f"Error reading alias record for {self.domain_name}: {e}")
+            return None
+        for rrs in resp.get("ResourceRecordSets", []):
+            if rrs["Name"].rstrip(".") == self.domain_name.rstrip(".") and rrs["Type"] == "A":
+                target = (rrs.get("AliasTarget") or {}).get("DNSName", "").rstrip(".")
+                if target.lower() == (alb.dns_name or "").rstrip(".").lower():
+                    return self
+        return None
+
+    def _change(self, session, G, action):
+        alb = G.nodes[self.alb_g_id]["data"]
+        hz = G.nodes[self.hz_g_id]["data"]
+        if not (alb.dns_name and alb.canonical_hosted_zone_id and hz.zone_id):
+            logger.warning(f"ALB DNS name not available yet; skipping alias for {self.domain_name}")
+            return False
+        session.client("route53").change_resource_record_sets(
+            HostedZoneId=hz.zone_id,
+            ChangeBatch={"Changes": [{
+                "Action": action,
+                "ResourceRecordSet": {
+                    "Name": self.domain_name,
+                    "Type": "A",
+                    "AliasTarget": self._alias(alb),
+                },
+            }]},
         )
+        logger.info(f"{action} alias {self.domain_name} -> {alb.dns_name}")
+        return True
 
-    # We have exactly one load balancer
-    lb = load_balancers[0]
-    return lb
+    def create(self, session, G):
+        return self._change(session, G, "UPSERT")
+
+    def update(self, session, G, diff=None):
+        return self._change(session, G, "UPSERT")
+
+    def delete(self, session, G):
+        try:
+            self._change(session, G, "DELETE")
+        except ClientError as e:
+            logger.warning(f"Could not delete alias {self.domain_name}: {e}")

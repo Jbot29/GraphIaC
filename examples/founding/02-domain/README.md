@@ -143,5 +143,7 @@ transcription.
 signups.
 
 **Or skip ahead:** if you already have a containerized app and a Postgres
-schema, [chapter 5](../05-webapp/) reuses this chapter's domain and
-certificate for an ALB instead of CloudFront.
+schema, [chapter 5](../05-webapp/) puts it on `app.yourco.com` behind a load
+balancer, sharing this chapter's hosted zone. (It requests its own
+certificate — this one lives in `us-east-1` because CloudFront requires it,
+and an ALB needs one in its own region.)

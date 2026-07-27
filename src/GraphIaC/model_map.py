@@ -16,12 +16,20 @@ from GraphIaC.aws.cognito import (
 )
 from GraphIaC.aws.deploy_role import DeployRole
 from GraphIaC.aws.dynamodb import DynamoTable
-from GraphIaC.aws.ec2.alb import ALB
-from GraphIaC.aws.ec2.listener import Listener
-from GraphIaC.aws.ec2_sg import SecurityGroup
+from GraphIaC.aws.ec2.alb import ALB, ACMCertificateALBEdge, ALBRoute53Edge
+from GraphIaC.aws.ecs import (
+    AlbEcsEdge,
+    ClusterServiceEdge,
+    EcrRepository,
+    EcsCluster,
+    EcsService,
+    EcsTaskRole,
+    IAMRoleEcsEdge,
+)
 from GraphIaC.aws.iam_role import IAMRole, IAMRoleInlinePolicyEdge, IAMRolePolicyEdge
 from GraphIaC.aws.lambda_dynamodb import LambdaDynamoEdge
 from GraphIaC.aws.lambda_func import IAMRolePolicyLambdaEdge, LambdaZipFile
+from GraphIaC.aws.rds import EcsRdsEdge, RDSPostgres
 from GraphIaC.aws.route53 import HostedZone, Route53AliasRecord
 from GraphIaC.aws.s3 import S3Bucket
 from GraphIaC.aws.ses import LambdaSESEdge, SESDomainIdentity, SESDomainRoute53Edge
@@ -48,9 +56,18 @@ BASE_MODEL_MAP = {
     "LambdaZipFile": LambdaZipFile,
     "SiteEndpointEdge": SiteEndpointEdge,
     "EndpointLambdaEdge": EndpointLambdaEdge,
-    "SecurityGroup": SecurityGroup,
     "ALB": ALB,
-    "Listener": Listener,
+    "ACMCertificateALBEdge": ACMCertificateALBEdge,
+    "ALBRoute53Edge": ALBRoute53Edge,
+    "EcsCluster": EcsCluster,
+    "EcsTaskRole": EcsTaskRole,
+    "EcsService": EcsService,
+    "ClusterServiceEdge": ClusterServiceEdge,
+    "IAMRoleEcsEdge": IAMRoleEcsEdge,
+    "AlbEcsEdge": AlbEcsEdge,
+    "EcrRepository": EcrRepository,
+    "RDSPostgres": RDSPostgres,
+    "EcsRdsEdge": EcsRdsEdge,
     "CognitoUserPool": CognitoUserPool,
     "CognitoUserPoolClient": CognitoUserPoolClient,
     "CognitoPoolClientEdge": CognitoPoolClientEdge,

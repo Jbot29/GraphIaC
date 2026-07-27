@@ -107,6 +107,11 @@ Current node inventory by service:
 - **API Gateway** (`apigateway.py`): `ApiSite`, `ApiEndpoint`
 - **SES** (`ses.py`): `SESDomainIdentity`
 - **Cognito** (`cognito.py`): `CognitoUserPool`, `CognitoUserPoolClient` (metadata-only node; `CognitoPoolClientEdge` provisions the app client; `CognitoLambdaAuthEdge` wires COGNITO_* env into a Lambda so its runtime can authenticate users — see `examples/lambda-ui/`)
+- **ALB** (`ec2/alb.py`): `ALB` (+ `ACMCertificateALBEdge` ⊘ for the HTTPS listener, `ALBRoute53Edge` for the A alias)
+- **ECS / ECR** (`ecs.py`): `EcsCluster`, `EcsTaskRole` (isa `IAMRole`, ECS trust policy), `EcsService` (owns its task definition — no separate node), `EcrRepository`; edges `ClusterServiceEdge`, `IAMRoleEcsEdge`, `AlbEcsEdge`
+- **RDS** (`rds.py`): `RDSPostgres` (`ManageMasterUserPassword` — credentials live only in Secrets Manager) + `EcsRdsEdge`
+
+**Security groups are not a node type** (`ec2/network.py`). Each compute node (ALB, EcsService, RDSPostgres) creates and destroys exactly one group named after itself; the *edges* open ports between them (`alb -> web`, `web -> db`). A group with no rules is meaningless and its rules are always about a relationship — so the relationship owns them. `network.py` also holds default-VPC discovery: nodes leave `vpc_id`/`subnet_ids` unset and get the account's default VPC, which keeps Fargate reachable without a NAT gateway.
 
 ### Two-Phase Pattern for Long-Running Resources
 
@@ -156,7 +161,7 @@ Shared `colorlog` setup. Call `setup_logger()` in new modules rather than callin
 
 ### Guards (`src/GraphIaC/guards.py`)
 
-`? predicate(label, ...)` statements in `.giac` files declare safety invariants (`? private(bucket)`). **Independence rule: predicates are raw boto3 only — never call node/edge class code.** Signatures in `PREDICATES` flow into the generated registry so both parsers validate at parse time. `verify` counts guard failures (exit 1); `run` reports them after applying but never blocks (warn-only by design; `--strict` is future). Pass/fail/pending states — pending = target not created yet. New predicates: add to `PREDICATES` + `_CHECKS`, regenerate the registry, cover pass/fail/pending in `tests/test_guards.py`.
+`? predicate(label, ...)` statements in `.giac` files declare safety invariants (`? private(bucket)`). **Independence rule: predicates are raw boto3 only — never call node/edge class code.** Signatures in `PREDICATES` flow into the generated registry so both parsers validate at parse time. `verify` counts guard failures (exit 1); `run` reports them after applying but never blocks (warn-only by design; `--strict` is future). Pass/fail/pending states — pending = target not created yet. Current set: `private`, `https-only`, `locked-to`, `admin-only-signup`, `authed`, `cors-locked`, `db-private`. New predicates: add to `PREDICATES` + `_CHECKS`, regenerate the registry, cover pass/fail/pending in `tests/test_guards.py`.
 
 ### Deploy Policy Generation (`src/GraphIaC/deploy_policy.py`)
 

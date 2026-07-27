@@ -71,6 +71,10 @@ PREDICATES = {
         "args": ["ApiSite"],
         "doc": "the API's CORS allow-list names real origins, never *",
     },
+    "db-private": {
+        "args": ["RDSPostgres"],
+        "doc": "the database has no public address and no open-to-the-world ingress",
+    },
 }
 
 
@@ -270,6 +274,54 @@ def _check_cors_locked(session, nodes, site_id):
     return ("pass", f"CORS limited to {', '.join(origins)}")
 
 
+def _check_db_private(session, nodes, db_id):
+    """Two ways a Postgres instance ends up on the internet, and this
+    catches both: a public address, or a security group that admits the
+    world. Raw describe calls — nothing here knows RDSPostgres exists."""
+    name = _field(nodes, db_id, "name")
+    region = _field(nodes, db_id, "region") or "us-east-2"
+    if not name:
+        return _pending("database name not resolvable yet")
+
+    rds = session.client("rds", region_name=region)
+    try:
+        instances = rds.describe_db_instances(DBInstanceIdentifier=name)["DBInstances"]
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "DBInstanceNotFound":
+            return _pending("database not created yet")
+        raise
+    if not instances:
+        return _pending("database not created yet")
+    db = instances[0]
+
+    if db.get("PubliclyAccessible"):
+        return ("fail", "PUBLICLY ACCESSIBLE — the instance has an internet-routable address")
+
+    port = (db.get("Endpoint") or {}).get("Port") or 5432
+    sg_ids = [g["VpcSecurityGroupId"] for g in db.get("VpcSecurityGroups", [])]
+    if not sg_ids:
+        return ("pass", "no security groups attached — unreachable")
+
+    ec2 = session.client("ec2", region_name=region)
+    groups = ec2.describe_security_groups(GroupIds=sg_ids)["SecurityGroups"]
+    sources = 0
+    for group in groups:
+        for perm in group.get("IpPermissions", []):
+            from_port = perm.get("FromPort", 0)
+            to_port = perm.get("ToPort", 65535)
+            if not (from_port <= port <= to_port):
+                continue
+            for rng in perm.get("IpRanges", []):
+                if rng.get("CidrIp") == "0.0.0.0/0":
+                    return ("fail", f"tcp/{port} is open to 0.0.0.0/0 on {group['GroupId']}")
+            for rng in perm.get("Ipv6Ranges", []):
+                if rng.get("CidrIpv6") == "::/0":
+                    return ("fail", f"tcp/{port} is open to ::/0 on {group['GroupId']}")
+            sources += len(perm.get("UserIdGroupPairs", []))
+
+    return ("pass", f"private address, tcp/{port} open to {sources} security group(s)")
+
+
 _CHECKS = {
     "private": _check_private,
     "https-only": _check_https_only,
@@ -277,6 +329,7 @@ _CHECKS = {
     "admin-only-signup": _check_admin_only_signup,
     "authed": _check_authed,
     "cors-locked": _check_cors_locked,
+    "db-private": _check_db_private,
 }
 
 

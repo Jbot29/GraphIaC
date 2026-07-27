@@ -35,9 +35,9 @@ deployed. A load balancer, a container running on Fargate, and a real
 Postgres instance. Costs money the moment it exists, and is the right answer
 anyway if this is the app.
 
-They aren't exclusive. Chapter 5 reuses the domain and certificate from
-chapter 2, and plenty of companies run both — the marketing site and
-waitlist on CloudFront, the product on ECS.
+They aren't exclusive. Chapter 5 shares chapter 2's hosted zone, and plenty
+of companies run both: `yourco.com` serving the marketing site and waitlist
+from CloudFront, `app.yourco.com` serving the product from ECS.
 
 | chapter | what you end up with | new AWS bill |
 |---|---|---|
