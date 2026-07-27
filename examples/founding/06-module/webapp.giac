@@ -1,0 +1,59 @@
+# Chapter 6 — the same stack, as a module
+#
+# Chapter 5 built ALB -> ECS -> Postgres out of eight nodes and seven
+# arrows, so you could see every one of them. This file does exactly the
+# same thing — byte for byte the same graph, asserted by a test — with the
+# pattern named once and used twice.
+#
+#   python -m GraphIaC graphiac --infra_file webapp.giac plan
+#
+# A `define` is not a new kind of thing. It is a macro over the graph:
+# instantiating it replays the body with its parameters bound and its
+# labels prefixed, and by the time the planner sees anything, no module
+# exists — just nodes and edges. Run `desugar` in the editor and the
+# expansion is there in full, as ordinary DSL you could have typed.
+#
+# That is what makes it compose where a library construct doesn't. Nothing
+# here owns the load balancer or hides the database: `web-db` and `web-lb`
+# are real labels, addressable from this file, and an arrow you didn't
+# anticipate is just an arrow.
+
+company = "yourco"
+region  = "us-east-2"
+
+define web-service(hz, host, cert, image,
+                   port: 8000, cpu: "512", memory: "1024", count: 1) {
+    lb        : ALB(name: "${name}-lb", region: region)
+    db        : RDSPostgres(name: "${name}-db", region: region, db_name: name,
+                            backup_retention_days: 7)
+    cluster   : EcsCluster(name: name, region: region)
+    task-role : EcsTaskRole(name: "${name}-task-role")
+
+    app : EcsService(name: name, region: region, image: image,
+                     container_port: port, cpu: cpu, memory: memory,
+                     desired_count: count,
+                     env: {DATABASE_HOST: db.endpoint,
+                           DATABASE_NAME: name,
+                           DATABASE_USER: "postgres",
+                           PORT: "${port}"})
+
+    cert      -> lb                            # HTTPS listener; gates lb until ISSUED
+    lb        -> hz : (domain_name: host)      # A alias record
+    cluster   -> app                           # which cluster it runs in
+    task-role -> app                           # pull images, write logs
+    lb        -> app : (health_check_path: "/healthz")
+    app       -> db : (role_g_id: task-role)   # SG rule + credentials
+
+    ? db-private(db)   # travels with the pattern — you cannot use one without it
+}
+
+hz     : HostedZone(domain_name: "${company}.com")
+images : EcrRepository(name: "${company}-web", region: region)
+
+app-cert : ACMCertificate(domain_name: "app.${company}.com", region: region,
+                          subject_alternative_names: [])
+
+app-cert -> hz    # DNS validation records
+
+web : web-service(hz: hz, host: "app.${company}.com", cert: app-cert,
+                  image: images.uri, cpu: "512", memory: "1024", count: 2)

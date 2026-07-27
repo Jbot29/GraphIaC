@@ -17,6 +17,9 @@ See dsl/spec.md for the language. In one line each:
                            `: Type(args)` makes it explicit
     name = value           a constant, substituted at parse time
     "${name}-web"          a constant interpolated into a string
+    define f(p) { … }      a module — a parameterized subgraph, expanded at
+                           parse time; `x : f(p: 1)` replays it with labels
+                           prefixed "x-"
     other.field            an attribute reference ($ref) — a data
                            dependency the planner resolves from live state
     #                      a comment
@@ -37,6 +40,10 @@ IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")  # labels may contain dashes
 TYPE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)?\s*(\(([\s\S]*)\))?$")  # Type, Type(...), or (...)
 IDENT_AT = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
 NUM_AT = re.compile(r"[+-]?(\d+\.?\d*|\.\d+)")
+DEFINE_RE = re.compile(r"^define\s+([A-Za-z_][A-Za-z0-9_-]*)\s*\(([\s\S]*?)\)\s*\{([\s\S]*)\}$")
+# like TYPE_RE but dashes allowed: module names follow label style, AWS
+# type names never contain one
+HEAD_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)?\s*(\(([\s\S]*)\))?$")
 
 
 _FAIL = object()  # sentinel: a value that failed to resolve (None is a real value)
@@ -325,6 +332,73 @@ class _Scanner:
         return None
 
 
+def _parse_params(inner, ln, err):
+    """`define f(a, b: 8000)` parameter list -> [{"name", "default"}].
+
+    Not _parse_args: there, a bare identifier is the one positional
+    argument; here it's a required parameter, and there can be many.
+    """
+    params = []
+    if inner is None or inner.strip() == "":
+        return params
+    sc = _Scanner(inner, ln, err)
+    while True:
+        if sc.eof():
+            break
+        pname = sc.ident()
+        if not pname:
+            err(ln, f'expected a parameter name at "{_clip(sc.rest())}"')
+            return params
+        default = None
+        sc.ws()
+        if sc.at() == ":":
+            sc.i += 1
+            default = sc.value()
+            if default is None:
+                return params
+        params.append({"name": pname, "default": default})
+        sc.ws()
+        if sc.eof():
+            break
+        if sc.at() == ",":
+            sc.i += 1
+            continue
+        err(ln, f'expected , between parameters — at "{_clip(sc.rest())}"')
+        return params
+    return params
+
+
+def _stmt_head(text):
+    """(label, type_name, args_raw) for a `label : Type(args)` statement,
+    or None. Used to spot module instantiations before node pass 1, since
+    an instance is written exactly like a node."""
+    ci = _index_top_level(text, ":")
+    if ci < 0:
+        return None
+    label = text[:ci].strip()
+    m = HEAD_RE.match(text[ci + 1 :].strip())
+    if not m or not m.group(1):
+        return None
+    return label, m.group(1), m.group(3) or ""
+
+
+def _local_label(scope, name):
+    """A label as written inside a module body -> the label it means.
+
+    Body labels are prefixed with the instance label; a parameter holding a
+    node label (`hz: hz` at the call site) resolves to that node. Anything
+    else is left alone so the caller's "unknown node" error fires.
+    """
+    if not scope:
+        return name
+    if name in scope["labels"]:
+        return scope["labels"][name]
+    v = scope["consts"].get(name)
+    if isinstance(v, str):
+        return v
+    return name
+
+
 def _parse_args(inner, ln, err):
     """`(args)` body -> (positional, named) of tagged values."""
     named, positional = {}, None
@@ -386,12 +460,14 @@ def parse(src, registry=None):
     graph = {"nodes": [], "edges": [], "guards": []}
 
     # ---- classify statements ----
-    const_stmts, node_stmts, edge_stmts, guard_stmts = [], [], [], []
+    const_stmts, node_stmts, edge_stmts, guard_stmts, define_stmts = [], [], [], [], []
     for st in _to_statements(src):
         if st.get("unclosed"):
             err(st["ln"], "unclosed ( [ or { — statement never ends")
             continue
-        if st["text"].startswith("?"):
+        if st["text"].startswith("define") and re.match(r"^define\b", st["text"]):
+            define_stmts.append(st)
+        elif st["text"].startswith("?"):
             guard_stmts.append(st)
         elif _index_top_level(st["text"], "->") >= 0:
             edge_stmts.append(st)
@@ -400,17 +476,71 @@ def parse(src, registry=None):
         elif _index_top_level(st["text"], ":") >= 0:
             node_stmts.append(st)
         else:
-            err(st["ln"], f'unrecognized statement (expected name = value, label : Type, a -> b, or ? predicate(...)): "{_clip(st["text"])}"')
+            err(st["ln"], f'unrecognized statement (expected name = value, label : Type, a -> b, ? predicate(...), or define name(...) {{…}}): "{_clip(st["text"])}"')
+
+    # ---- module definitions ----
+    #
+    # A module is a macro over the graph, not a type: `define` collects
+    # statements, an instance replays them with its parameters bound and its
+    # labels prefixed, and by the time there is a graph no module exists.
+    # That is what keeps modules composable where a construct isn't — the
+    # expansion is ordinary DSL, and `desugar` needs to know nothing.
+    modules = {}
+    for st in define_stmts:
+        m = DEFINE_RE.match(st["text"])
+        if not m:
+            err(st["ln"], 'bad define — expected: define name(param, param: default) { … }')
+            continue
+        mod_name, params_raw, body_raw = m.group(1), m.group(2), m.group(3)
+        if mod_name in registry["nodes"] or mod_name in registry["edges"]:
+            err(st["ln"], f'"{mod_name}" is already an AWS type — pick another module name')
+            continue
+        if mod_name in modules:
+            err(st["ln"], f'module "{mod_name}" defined twice (first on line {modules[mod_name]["line"]})')
+            continue
+
+        params = _parse_params(params_raw, st["ln"], err)
+        if any(p["name"] == "name" for p in params):
+            err(st["ln"], '"name" is reserved inside a body — it holds the instance label')
+            continue
+
+        # body lines are numbered from the source, not from the block
+        brace = st["text"].index("{")
+        body_offset = st["ln"] + st["text"][:brace].count("\n")
+        body = {"nodes": [], "edges": [], "guards": []}
+        for bst in _to_statements(body_raw):
+            bln = body_offset + bst["ln"] - 1
+            bst = {"ln": bln, "text": bst["text"]}
+            if bst.get("unclosed"):
+                err(bln, "unclosed ( [ or { — statement never ends")
+            elif bst["text"].startswith("?"):
+                body["guards"].append(bst)
+            elif re.match(r"^define\b", bst["text"]):
+                err(bln, "a module cannot define another module")
+            elif _index_top_level(bst["text"], "->") >= 0:
+                body["edges"].append(bst)
+            elif _index_top_level(bst["text"], "=") >= 0:
+                err(bln, "constants are not allowed in a module body — use a parameter with a default")
+            elif _index_top_level(bst["text"], ":") >= 0:
+                body["nodes"].append(bst)
+            else:
+                err(bln, f'unrecognized statement in module "{mod_name}": "{_clip(bst["text"])}"')
+        body_labels = {h[0] for h in (_stmt_head(b["text"]) for b in body["nodes"]) if h}
+        clash = sorted(body_labels & {p["name"] for p in params})
+        if clash:
+            err(st["ln"], f'parameter "{clash[0]}" has the same name as a node in the body')
+            continue
+        modules[mod_name] = {"name": mod_name, "params": params, "body": body, "line": st["ln"]}
 
     # a tagged value -> the plain JSON the graph carries
-    def _resolve(v, ln, consts, nodes, refs_allowed):
+    def _resolve(v, ln, consts, nodes, refs_allowed, scope=None):
         t = v["t"]
         if t in ("str", "num", "bool"):
             return v["v"]
         if t == "list":
             out = []
             for e in v["v"]:
-                r = _resolve(e, ln, consts, nodes, refs_allowed)
+                r = _resolve(e, ln, consts, nodes, refs_allowed, scope)
                 if r is _FAIL:
                     return _FAIL
                 out.append(r)
@@ -418,7 +548,7 @@ def parse(src, registry=None):
         if t == "map":
             out = {}
             for k, e in v["v"].items():
-                r = _resolve(e, ln, consts, nodes, refs_allowed)
+                r = _resolve(e, ln, consts, nodes, refs_allowed, scope)
                 if r is _FAIL:
                     return _FAIL
                 out[k] = r
@@ -446,23 +576,27 @@ def parse(src, registry=None):
         if t == "ident":
             if v["v"] in consts:
                 return consts[v["v"]]
-            if nodes is not None and v["v"] in nodes:
-                return v["v"]  # a bare label means its g_id
+            lbl = _local_label(scope, v["v"])
+            if nodes is not None and lbl in nodes:
+                return lbl  # a bare label means its g_id
             err(ln, f'unknown name "{v["v"]}" — not a constant{" or node label" if nodes is not None else ""}')
             return _FAIL
         if t == "ref":
             if not refs_allowed:
                 err(ln, f'attribute references ({v["g_id"]}.{v["field"]}) are not allowed here')
                 return _FAIL
-            target = nodes.get(v["g_id"])
+            g_id = _local_label(scope, v["g_id"])
+            target = nodes.get(g_id)
             if not target:
                 err(ln, f'reference to unknown node "{v["g_id"]}" in {v["g_id"]}.{v["field"]}')
                 return _FAIL
-            reg = registry["nodes"][target["type"]]
+            reg = registry["nodes"].get(target["type"])
+            if reg is None:
+                return {"$ref": {"g_id": g_id, "field": v["field"]}}
             if v["field"] not in reg["fields"]:
                 err(ln, f'{target["type"]} has no field "{v["field"]}" (in {v["g_id"]}.{v["field"]})')
                 return _FAIL
-            return {"$ref": {"g_id": v["g_id"], "field": v["field"]}}
+            return {"$ref": {"g_id": g_id, "field": v["field"]}}
         return _FAIL
 
     # ---- constants (parse-time only; may use earlier constants) ----
@@ -487,6 +621,86 @@ def parse(src, registry=None):
             warn(st["ln"], f'constant "{name}" redefined')
         consts[name] = plain
 
+    # ---- module instances: replay each body with its parameters bound ----
+    #
+    # An instance is written exactly like a node (`web : web-service(...)`),
+    # so instances are separated out here, before pass 1 would call the
+    # module name an unknown node type.
+    instances, real_node_stmts = [], []
+    for st in node_stmts:
+        head = _stmt_head(st["text"])
+        if head and head[1] in modules:
+            instances.append({"st": st, "label": head[0], "module": modules[head[1]],
+                              "args_raw": head[2]})
+        else:
+            real_node_stmts.append(st)
+    node_stmts = real_node_stmts
+
+    # Every label the file will end up with, known from syntax alone —
+    # needed before arguments resolve, because an argument may name a node
+    # ( `hz: hz` ) and nothing has been collected yet.
+    instance_of = {}
+    all_labels = {}
+    for st in node_stmts:
+        head = _stmt_head(st["text"])
+        if head:
+            all_labels[head[0]] = {"type": head[1]}
+    for inst in instances:
+        inst["labels"] = {}
+        for bst in inst["module"]["body"]["nodes"]:
+            head = _stmt_head(bst["text"])
+            if head:
+                expanded = f'{inst["label"]}-{head[0]}'
+                inst["labels"][head[0]] = expanded
+                all_labels[expanded] = {"type": head[1]}
+                instance_of[expanded] = inst["label"]
+
+    for inst in instances:
+        st, mod = inst["st"], inst["module"]
+        positional, named = _parse_args(inst["args_raw"], st["ln"], err)
+        if positional is not None:
+            err(st["ln"], f'{mod["name"]} is a module — its arguments must all be named')
+
+        scope_consts = {"name": inst["label"]}
+        known = {p["name"] for p in mod["params"]}
+        for f in named:
+            if f not in known:
+                err(st["ln"], f'{mod["name"]} has no parameter "{f}"')
+        for p in mod["params"]:
+            if p["name"] in named:
+                # a ref may ride in as an argument: it stays symbolic all
+                # the way to the field it lands on, and the planner blocks
+                # that node exactly as it would have without the module
+                r = _resolve(named[p["name"]], st["ln"], consts, all_labels, True)
+                if r is not _FAIL:
+                    scope_consts[p["name"]] = r
+            elif p["default"] is not None:
+                r = _resolve(p["default"], mod["line"], consts, all_labels, True)
+                if r is not _FAIL:
+                    scope_consts[p["name"]] = r
+            else:
+                err(st["ln"], f'{mod["name"]} needs an argument for "{p["name"]}"')
+
+        scope = {"prefix": inst["label"], "consts": scope_consts, "labels": inst["labels"]}
+        merged = dict(consts)
+        merged.update(scope_consts)
+        for kind, target in (("nodes", node_stmts), ("edges", edge_stmts), ("guards", guard_stmts)):
+            for bst in mod["body"][kind]:
+                target.append({"ln": bst["ln"], "text": bst["text"],
+                               "scope": scope, "consts": merged})
+
+    def _consts_for(st):
+        return st.get("consts") or consts
+
+    def _unknown_node_msg(lbl):
+        if lbl in consts:
+            return f'"{lbl}" is a constant, not a node'
+        if lbl in modules or any(i["label"] == lbl for i in instances):
+            inner = sorted(k for k, owner in instance_of.items() if owner == lbl)
+            return (f'"{lbl}" is a module instance, not a node'
+                    + (f" — did you mean {inner[0]}?" if inner else ""))
+        return f'unknown node "{lbl}" in edge'
+
     # ---- nodes, pass 1: collect every label and type ----
     nodes = {}
     for st in node_stmts:
@@ -496,6 +710,8 @@ def parse(src, registry=None):
         if not IDENT.match(label):
             err(st["ln"], f'bad label "{_clip(label)}"')
             continue
+        if st.get("scope"):
+            label = st["scope"]["labels"].get(label, label)
         if label in consts:
             err(st["ln"], f'"{label}" is already a constant — labels and constants share one namespace')
             continue
@@ -513,7 +729,9 @@ def parse(src, registry=None):
             else:
                 err(st["ln"], f'unknown node type "{type_name}"')
             continue
-        nodes[label] = {"g_id": label, "type": type_name, "fields": {}, "line": st["ln"], "args_raw": m.group(3) or ""}
+        nodes[label] = {"g_id": label, "type": type_name, "fields": {}, "line": st["ln"],
+                        "args_raw": m.group(3) or "", "consts": _consts_for(st),
+                        "scope": st.get("scope")}
 
     # ---- nodes, pass 2: resolve fields, default the name, check required ----
     for node in nodes.values():
@@ -524,7 +742,7 @@ def parse(src, registry=None):
             if not reg["nameField"]:
                 err(node["line"], f'{node["type"]} has no name field — a positional argument means nothing here; name every field')
             else:
-                r = _resolve(positional, node["line"], consts, nodes, True)
+                r = _resolve(positional, node["line"], node["consts"], nodes, True, node["scope"])
                 if r is not _FAIL:
                     fields[reg["nameField"]] = r
         for f, v in named.items():
@@ -534,7 +752,7 @@ def parse(src, registry=None):
             if f in fields:
                 err(node["line"], f'field "{f}" already set by the positional argument')
                 continue
-            r = _resolve(v, node["line"], consts, nodes, True)
+            r = _resolve(v, node["line"], node["consts"], nodes, True, node["scope"])
             if r is not _FAIL:
                 fields[f] = r
         if reg["nameField"] and reg["nameField"] not in fields:
@@ -568,10 +786,13 @@ def parse(src, registry=None):
         b_label = (rhs if ci < 0 else rhs[:ci]).strip()
         clause = None if ci < 0 else rhs[ci + 1 :].strip()
 
+        a_label = _local_label(st.get("scope"), a_label)
+        b_label = _local_label(st.get("scope"), b_label)
+
         ok = True
         for lbl in (a_label, b_label):
             if lbl not in nodes:
-                err(st["ln"], f'"{lbl}" is a constant, not a node' if lbl in consts else f'unknown node "{lbl}" in edge')
+                err(st["ln"], _unknown_node_msg(lbl))
                 ok = False
         if not ok:
             continue
@@ -635,7 +856,7 @@ def parse(src, registry=None):
             if f in (reg["source"]["field"], reg["dest"]["field"]):
                 err(st["ln"], f'"{f}" is set by the arrow itself')
                 continue
-            r = _resolve(v, st["ln"], consts, nodes, True)
+            r = _resolve(v, st["ln"], _consts_for(st), nodes, True, st.get("scope"))
             if r is not _FAIL:
                 fields[f] = r
         for f, info in reg["fields"].items():
@@ -666,6 +887,7 @@ def parse(src, registry=None):
         if len(args) != len(expected):
             err(st["ln"], f'{name} takes {len(expected)} argument{"s" if len(expected) != 1 else ""} ({", ".join(expected)}), got {len(args)}')
             continue
+        args = [_local_label(st.get("scope"), a) for a in args]
         ok = True
         for i, (label, want) in enumerate(zip(args, expected)):
             if label not in nodes:

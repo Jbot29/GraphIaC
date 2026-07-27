@@ -3,7 +3,7 @@
 *You have an idea, a domain name you just bought, and an empty AWS account.
 This is the rest.*
 
-Five chapters. Each one is a single `.giac` file, none longer than forty
+Six chapters. Each one is a single `.giac` file, none longer than forty
 lines, and each one leaves you with something you'd actually want:
 
 ```
@@ -12,12 +12,13 @@ chapter 2   your company on the internet — your domain, HTTPS, a landing page
 chapter 3   a waitlist that stores signups and emails people back
 chapter 4   a private back office to read them
 chapter 5   or: a web server and a Postgres database, if that's what you have
+chapter 6   and then: that whole stack as one line you can reuse
 ```
 
 Read them in order the first time. Every chapter's README ends by telling
 you where to go next.
 
-After that, treat it as a runbook rather than a tutorial. These five are the
+After that, treat it as a runbook rather than a tutorial. These are the
 patterns almost every company builds in its first year, and they are meant
 to be copied, renamed, and stacked — not read once and admired. The goal is
 that "put a database behind my app" stops being a day of reading IAM
@@ -52,6 +53,7 @@ from CloudFront, `app.yourco.com` serving the product from ECS.
 | [3 — the waitlist](03-waitlist/) | `POST /signup` → Lambda → DynamoDB, plus a DKIM-signed confirmation email | ~$0 idle |
 | [4 — the back office](04-app/) | One Lambda serving a Cognito-protected console over your signups | ~$0 idle |
 | [5 — the web server](05-webapp/) | ALB → ECS Fargate → RDS Postgres on your domain, with the security groups written for you | ~$45/mo |
+| [6 — the module](06-module/) | Chapter 5's stack named once with `define` and reusable — the same graph, asserted by a test | same as 5 |
 
 ---
 

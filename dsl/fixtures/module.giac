@@ -1,0 +1,28 @@
+# define — a named, parameterized subgraph, expanded at parse time.
+# Two instances of one pattern; every internal label is prefixed with the
+# instance label, so nothing collides and web-db is addressable from here.
+company = "yourco"
+
+define web-service(hz, host, image, port: 8000, size: "512") {
+    lb        : ALB(name: "${name}-lb")
+    db        : RDSPostgres(name: "${name}-db")
+    cluster   : EcsCluster(name: name)
+    task-role : EcsTaskRole(name: "${name}-task-role")
+    app       : EcsService(name: name, image: image, container_port: port,
+                           cpu: size,
+                           env: {DATABASE_HOST: db.endpoint, PORT: "${port}"})
+
+    lb        -> hz : (domain_name: host)
+    cluster   -> app
+    task-role -> app
+    lb        -> app
+    app       -> db : (role_g_id: task-role)
+
+    ? db-private(db)
+}
+
+hz : HostedZone(domain_name: "${company}.com")
+
+web    : web-service(hz: hz, host: "app.${company}.com", image: "web:latest")
+worker : web-service(hz: hz, host: "jobs.${company}.com", image: "worker:latest",
+                     port: 9000, size: "1024")

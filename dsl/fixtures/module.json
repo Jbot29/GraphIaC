@@ -1,0 +1,231 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "hz",
+        "type": "HostedZone",
+        "fields": {
+          "domain_name": "yourco.com"
+        },
+        "line": 24
+      },
+      {
+        "g_id": "web-lb",
+        "type": "ALB",
+        "fields": {
+          "name": "web-lb"
+        },
+        "line": 7
+      },
+      {
+        "g_id": "web-db",
+        "type": "RDSPostgres",
+        "fields": {
+          "name": "web-db"
+        },
+        "line": 8
+      },
+      {
+        "g_id": "web-cluster",
+        "type": "EcsCluster",
+        "fields": {
+          "name": "web"
+        },
+        "line": 9
+      },
+      {
+        "g_id": "web-task-role",
+        "type": "EcsTaskRole",
+        "fields": {
+          "name": "web-task-role"
+        },
+        "line": 10
+      },
+      {
+        "g_id": "web-app",
+        "type": "EcsService",
+        "fields": {
+          "name": "web",
+          "image": "web:latest",
+          "container_port": 8000,
+          "cpu": "512",
+          "env": {
+            "DATABASE_HOST": {
+              "$ref": {
+                "g_id": "web-db",
+                "field": "endpoint"
+              }
+            },
+            "PORT": "8000"
+          }
+        },
+        "line": 11
+      },
+      {
+        "g_id": "worker-lb",
+        "type": "ALB",
+        "fields": {
+          "name": "worker-lb"
+        },
+        "line": 7
+      },
+      {
+        "g_id": "worker-db",
+        "type": "RDSPostgres",
+        "fields": {
+          "name": "worker-db"
+        },
+        "line": 8
+      },
+      {
+        "g_id": "worker-cluster",
+        "type": "EcsCluster",
+        "fields": {
+          "name": "worker"
+        },
+        "line": 9
+      },
+      {
+        "g_id": "worker-task-role",
+        "type": "EcsTaskRole",
+        "fields": {
+          "name": "worker-task-role"
+        },
+        "line": 10
+      },
+      {
+        "g_id": "worker-app",
+        "type": "EcsService",
+        "fields": {
+          "name": "worker",
+          "image": "worker:latest",
+          "container_port": 9000,
+          "cpu": "1024",
+          "env": {
+            "DATABASE_HOST": {
+              "$ref": {
+                "g_id": "worker-db",
+                "field": "endpoint"
+              }
+            },
+            "PORT": "9000"
+          }
+        },
+        "line": 11
+      }
+    ],
+    "edges": [
+      {
+        "type": "ALBRoute53Edge",
+        "fields": {
+          "alb_g_id": "web-lb",
+          "hz_g_id": "hz",
+          "domain_name": "app.yourco.com"
+        },
+        "inferred": true,
+        "line": 15
+      },
+      {
+        "type": "ClusterServiceEdge",
+        "fields": {
+          "cluster_g_id": "web-cluster",
+          "service_g_id": "web-app"
+        },
+        "inferred": true,
+        "line": 16
+      },
+      {
+        "type": "IAMRoleEcsEdge",
+        "fields": {
+          "role_g_id": "web-task-role",
+          "service_g_id": "web-app"
+        },
+        "inferred": true,
+        "line": 17
+      },
+      {
+        "type": "AlbEcsEdge",
+        "fields": {
+          "alb_g_id": "web-lb",
+          "ecs_g_id": "web-app"
+        },
+        "inferred": true,
+        "line": 18
+      },
+      {
+        "type": "EcsRdsEdge",
+        "fields": {
+          "ecs_g_id": "web-app",
+          "rds_g_id": "web-db",
+          "role_g_id": "web-task-role"
+        },
+        "inferred": true,
+        "line": 19
+      },
+      {
+        "type": "ALBRoute53Edge",
+        "fields": {
+          "alb_g_id": "worker-lb",
+          "hz_g_id": "hz",
+          "domain_name": "jobs.yourco.com"
+        },
+        "inferred": true,
+        "line": 15
+      },
+      {
+        "type": "ClusterServiceEdge",
+        "fields": {
+          "cluster_g_id": "worker-cluster",
+          "service_g_id": "worker-app"
+        },
+        "inferred": true,
+        "line": 16
+      },
+      {
+        "type": "IAMRoleEcsEdge",
+        "fields": {
+          "role_g_id": "worker-task-role",
+          "service_g_id": "worker-app"
+        },
+        "inferred": true,
+        "line": 17
+      },
+      {
+        "type": "AlbEcsEdge",
+        "fields": {
+          "alb_g_id": "worker-lb",
+          "ecs_g_id": "worker-app"
+        },
+        "inferred": true,
+        "line": 18
+      },
+      {
+        "type": "EcsRdsEdge",
+        "fields": {
+          "ecs_g_id": "worker-app",
+          "rds_g_id": "worker-db",
+          "role_g_id": "worker-task-role"
+        },
+        "inferred": true,
+        "line": 19
+      }
+    ],
+    "guards": [
+      {
+        "predicate": "db-private",
+        "args": [
+          "web-db"
+        ],
+        "line": 21
+      },
+      {
+        "predicate": "db-private",
+        "args": [
+          "worker-db"
+        ],
+        "line": 21
+      }
+    ]
+  },
+  "errors": []
+}
