@@ -67,6 +67,10 @@ PREDICATES = {
         "args": ["LambdaZipFile"],
         "doc": "if the function has a public URL, Cognito auth is wired into it",
     },
+    "cors-locked": {
+        "args": ["ApiSite"],
+        "doc": "the API's CORS allow-list names real origins, never *",
+    },
 }
 
 
@@ -236,12 +240,43 @@ def _check_authed(session, nodes, fn_id):
     return ("fail", "PUBLIC URL WITH NO AUTH — anyone on the internet can call this")
 
 
+def _check_cors_locked(session, nodes, site_id):
+    name = _field(nodes, site_id, "site_name")
+    region = _field(nodes, site_id, "region") or "us-east-2"
+    if not name:
+        return _pending("api name not resolvable yet")
+    api = session.client("apigatewayv2", region_name=region)
+    target = None
+    token = None
+    while True:
+        kwargs = {"MaxResults": "100"}
+        if token:
+            kwargs["NextToken"] = token
+        resp = api.get_apis(**kwargs)
+        for a in resp.get("Items", []):
+            if a.get("Name") == name:
+                target = a
+        token = resp.get("NextToken")
+        if not token:
+            break
+    if not target:
+        return _pending("api not created yet")
+
+    origins = target.get("CorsConfiguration", {}).get("AllowOrigins")
+    if not origins:
+        return ("pass", "no CORS configured — no cross-origin access allowed")
+    if "*" in origins:
+        return ("fail", "CORS allows *  — any site on the internet can call this API from a browser")
+    return ("pass", f"CORS limited to {', '.join(origins)}")
+
+
 _CHECKS = {
     "private": _check_private,
     "https-only": _check_https_only,
     "locked-to": _check_locked_to,
     "admin-only-signup": _check_admin_only_signup,
     "authed": _check_authed,
+    "cors-locked": _check_cors_locked,
 }
 
 

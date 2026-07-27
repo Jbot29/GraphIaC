@@ -1,0 +1,43 @@
+# Chapter 2 — the domain
+#
+#   https://yourco.com  ->  CloudFront (HTTPS, HTTP/2, compressed)
+#                       ->  private S3 bucket (only CloudFront can read)
+#   + an ACM certificate, DNS-validated automatically
+#   + pretty URLs (/about -> /about/index.html) via a CloudFront function
+#
+# Change the two names below. The hosted zone must already exist in
+# Route53 — buy the domain there, or point your registrar's nameservers
+# at it (README.md walks through both).
+#
+#   python -m GraphIaC graphiac --infra_file site.giac run
+#
+# The FIRST run requests the certificate and writes its validation records;
+# everything downstream shows ⊘ BLOCKED. That is the expected output, not a
+# failure — ACM takes minutes to hours. Run again later and the rest comes
+# up on its own.
+#
+# Then publish the page:
+#
+#   aws s3 cp index.html s3://yourco-com-site/ --profile graphiac
+
+domain    = "yourco.com"        # your domain (hosted zone must exist)
+site-name = "yourco-com-site"   # bucket names are globally unique
+
+hz     : HostedZone(domain_name: domain)
+cert   : ACMCertificate(domain_name: domain)
+bucket : S3Bucket(bucket_name: site-name)
+cf     : CloudFrontDistribution(domain_name: domain)
+
+pretty-urls : CloudFrontFunction(comment: "Rewrite pretty URLs to index.html",
+                                 function_code: file("url-rewrite.js"))
+
+cert -> hz                            # DNS validation records, automatically
+cert -> cf                            # viewer certificate (gates cf until ISSUED)
+cf   -> bucket                        # OAC: only this distribution can read
+cf   -> hz : (domain_name: domain)    # A alias record for the domain
+pretty-urls -> cf                     # rewrite on every viewer request
+
+# --- declared invariants: independent checks, never the provisioning code ---
+? private(bucket)          # the bucket must never be publicly readable
+? https-only(cf)           # viewers forced to HTTPS, modern TLS
+? locked-to(bucket, cf)    # only this distribution can read the bucket

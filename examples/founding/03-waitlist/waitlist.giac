@@ -1,0 +1,50 @@
+# Chapter 3 — the waitlist
+#
+#   POST https://<api>/signup
+#     -> Lambda  -> DynamoDB     (the row)
+#                -> SES          (the confirmation email)
+#
+# Six arrows. Every one of them is an IAM policy or a service integration
+# you would otherwise write by hand, and none of them appears in this file
+# as anything but an arrow.
+#
+#   ./build.sh
+#   python -m GraphIaC graphiac --infra_file waitlist.giac run
+#
+# The run prints the API's invoke URL. Paste it into index.html, publish
+# the page to chapter 2's bucket, and you are collecting signups.
+#
+# SES starts every account in the sandbox — you can only send to addresses
+# you have verified. README.md covers getting out. Signups still work while
+# you're in it; only the confirmation email is skipped.
+
+domain    = "yourco.com"
+mail-from = "hello@yourco.com"
+region    = "us-east-2"
+
+hz      : HostedZone(domain_name: domain)
+mail    : SESDomainIdentity(domain: domain, region: region)
+
+signups : DynamoTable(region: region,
+                      partition_key: {name: "email", attr_type: "S"})
+
+signup-role : IAMRole
+signup      : LambdaZipFile(runtime: "python3.13", handler: "app.handler",
+                            zip_file_path: "./deployment.zip", region: region,
+                            timeout: 10,
+                            env: {TABLE_NAME: "signups",
+                                  MAIL_FROM: mail-from,
+                                  SITE_URL: "https://yourco.com"})
+
+api  : ApiSite(region: region, cors_origins: ["https://yourco.com"])
+join : ApiEndpoint(method: "POST", path: "/signup")
+
+signup-role -> signup                        # basic execution + log group
+api         -> join                          # the route on the HTTP API
+join        -> signup                        # integration + invoke permission
+signup      -> signups : (role_g_id: signup-role)   # read/write, that table only
+signup      -> mail    : (role_g_id: signup-role)   # ses:SendEmail, that domain only
+mail        -> hz                            # the three DKIM CNAMEs
+
+# --- declared invariants: independent checks, never the provisioning code ---
+? cors-locked(api)   # your signup endpoint is not callable from every site on earth

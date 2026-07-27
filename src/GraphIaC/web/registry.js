@@ -722,6 +722,12 @@ return {
       ],
       "doc": "if the function has a public URL, Cognito auth is wired into it"
     },
+    "cors-locked": {
+      "args": [
+        "ApiSite"
+      ],
+      "doc": "the API's CORS allow-list names real origins, never *"
+    },
     "https-only": {
       "args": [
         "CloudFrontDistribution"

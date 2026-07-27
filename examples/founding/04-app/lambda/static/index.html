@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YourCo — back office</title>
+<style>
+  :root { --bg:#f7f2e6; --panel:#fbf8ef; --ink:#22304a; --muted:rgba(34,48,74,0.6);
+          --rule:#e3d9c2; --accent:#1f7a6d; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink);
+         font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+         font-size:14px; }
+  main { width:min(760px, 94vw); margin:0 auto; padding:2.5rem 0; }
+  header { display:flex; align-items:baseline; justify-content:space-between;
+           gap:1rem; margin-bottom:1.5rem; flex-wrap:wrap; }
+  h1 { font-size:1rem; margin:0; letter-spacing:0.02em; }
+  .who { font-size:0.8rem; color:var(--muted); }
+  .who a { color:var(--accent); }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(9rem, 1fr));
+           gap:0.75rem; margin-bottom:1.5rem; }
+  .tile { background:var(--panel); border:1px solid var(--rule); padding:0.9rem 1rem; }
+  .tile .n { font-size:1.7rem; line-height:1.1; }
+  .tile .k { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.1em;
+             color:var(--muted); margin-top:0.35rem; }
+  .bar { display:flex; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap; }
+  button { font:inherit; font-size:0.85rem; padding:0.5rem 1rem; cursor:pointer;
+           background:var(--panel); color:var(--ink); border:1px solid var(--ink); }
+  button:hover { background:var(--ink); color:var(--bg); }
+  .wrap { overflow-x:auto; background:var(--panel); border:1px solid var(--rule); }
+  table { border-collapse:collapse; width:100%; min-width:26rem; }
+  th, td { text-align:left; padding:0.55rem 1rem; border-bottom:1px solid var(--rule);
+           white-space:nowrap; }
+  th { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.1em;
+       color:var(--muted); font-weight:400; }
+  tbody tr:last-child td { border-bottom:0; }
+  .empty { padding:1.5rem 1rem; color:var(--muted); }
+  .note { font-size:0.78rem; color:var(--muted); margin-top:1.25rem; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>YourCo — back office</h1>
+    <p class="who"><span id="viewer"></span> · <a href="/logout">sign out</a></p>
+  </header>
+
+  <section class="tiles">
+    <div class="tile"><div class="n" id="total">—</div><div class="k">on the list</div></div>
+    <div class="tile"><div class="n" id="week">—</div><div class="k">last 7 days</div></div>
+    <div class="tile"><div class="n" id="latest">—</div><div class="k">most recent</div></div>
+  </section>
+
+  <div class="bar">
+    <button id="refresh">refresh</button>
+    <button id="csv">download CSV</button>
+  </div>
+
+  <div class="wrap">
+    <table>
+      <thead><tr><th>email</th><th>joined</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="empty" id="empty">loading…</p>
+  </div>
+
+  <p class="note">
+    Reading chapter 3's DynamoDB table. This function can do exactly that and
+    nothing else — the permission is the <code>console → signups</code> arrow.
+  </p>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
