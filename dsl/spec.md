@@ -51,6 +51,32 @@ hz : HostedZone(domain_name: domain)
 Values are strings (`"…"`), numbers, booleans (`true` / `false`), lists
 (`[a, b]`), or maps (`{name: "id", attr_type: "S"}`).
 
+### Interpolation — one name, spelled once
+
+`"${name}"` inside a string substitutes a constant. Like the constant
+itself, this happens **at parse time**: the graph carries the finished
+string and never sees the template.
+
+```
+company = "yourco"
+domain  = "${company}.com"
+
+bucket : S3Bucket("${company}-com-site")
+api    : ApiSite(cors_origins: ["https://${domain}"])
+```
+
+- **Constants only.** Not node labels (a label's only value is its own
+  name, and allowing it would read like a reference without being one) and
+  not attribute references — `"${cert.arn}"` is an error, because
+  interpolation has to produce a value at parse time and a `$ref` has none
+  until plan. Write `cert.arn` as the whole value instead.
+- Numbers and booleans render as they would print (`8000` → `"8000"`); a
+  list or map is an error, not a formatting question.
+- `\${` is a literal `${`. `desugar` re-escapes it, so output round-trips.
+
+This is what keeps a module signature honest later: a body that can't
+build its own names from its parameters isn't parameterized.
+
 ---
 
 ## Nodes — the label is the identity
@@ -199,6 +225,65 @@ relationship exists anyway — no ARN plumbing in your config:
 ```
 cert -> cf        # viewer certificate; cf stays BLOCKED until cert is ISSUED
 ```
+
+---
+
+## Modules — `define` names a pattern
+
+A **module** is a named, parameterized subgraph. It is the answer to the
+same file appearing in three repos with six strings changed.
+
+```
+define web-service(hz, host, image, port: 8000, cpu: "512") {
+    lb        : ALB(name: "${name}-lb")
+    db        : RDSPostgres(name: "${name}-db")
+    app       : EcsService(name: name, image: image, container_port: port)
+
+    lb  -> hz : (domain_name: host)
+    lb  -> app
+    app -> db : (role_g_id: task-role)
+
+    ? db-private(db)
+}
+
+web : web-service(hz: hz, host: "app.yourco.com", image: images.uri)
+```
+
+**A module is a macro over the graph, not a type.** Instantiating it
+replays the body with its parameters bound and its labels prefixed; by the
+time there is a graph, no module exists — just nodes and edges. `desugar`
+needs to know nothing about modules, and its output is the expansion in
+full, as ordinary DSL you could have typed.
+
+That is what makes it compose where a library construct doesn't. A
+construct owns its resources, so two services behind one load balancer
+means fighting the thing that thinks it owns the load balancer. Here
+`web-lb` is a real label, addressable from the calling file, and an arrow
+nobody anticipated is just an arrow.
+
+- **Instantiation is written exactly like a node** — `label : module(args)`.
+  A module should feel like a bigger node, because that's what it is.
+- **Labels are prefixed with the instance label**, joined by `-`: body
+  label `lb` in instance `web` becomes `web-lb`. Two instances cannot
+  collide, and every internal label is addressable from outside. There are
+  no declared outputs; the labels *are* the interface.
+- **`name` is bound to the instance label** inside the body, and is
+  therefore reserved as a parameter name. `"${name}-lb"` is how a body
+  builds names it can't know.
+- **Parameters** are `p` (required) or `p: default`. Arguments are always
+  named. A parameter may carry a node label (`hz: hz`) — inside the body
+  that name resolves to the node — or an attribute reference
+  (`image: images.uri`), which stays symbolic all the way to the field it
+  lands on, so the planner BLOCKS that node exactly as it would have
+  without the module.
+- **Guards belong in a body.** This is the real difference from a
+  construct: a module isn't a bundle of resources, it's *a pattern plus its
+  guarantees*. Ship the standard bucket with `? private(b)` attached and
+  nobody can instantiate it without the invariant.
+
+Not in v1: nested modules (a body may not instantiate another module),
+constants in a body (use a parameter with a default), and `use` of another
+file — see *Not yet in the language*.
 
 ---
 
@@ -425,8 +510,15 @@ otherwise write by hand.
   (`? baseline`), and live re-evaluation badges in the sandbox diagram.
 - **Arrow chaining** (`api -> hello -> handler`) — sugar for consecutive
   edges. Cheap, but nothing forces it yet.
-- **String interpolation** (`"${domain}-site"`) — until a script repeats
-  itself painfully without it.
+- **A module standard library** (`use std.web-service`) — `define` ships
+  (see *Modules*), but only within one file. A `use` of a *file* cannot work
+  in the browser sandbox: expansion happens at parse time and the JS parser
+  has no filesystem, which is exactly why `file()` stays symbolic. The way
+  out is to ship std modules as data in the generated registry, next to the
+  type tables — both parsers get them from one source and no disk is
+  touched. Deferred until the copied chapters show which patterns are real.
+- **Nested modules** — a body may not instantiate another module. Deferred
+  until something needs it.
 - **A global `region` lens** — one `region : us-east-2` statement that fills
   every node's unset region, the way klangbild's `tempo` resolves beats.
   Complicated by per-service defaults (SES and ACM want `us-east-1`).

@@ -1,0 +1,70 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "a",
+        "type": "S3Bucket",
+        "fields": {
+          "bucket_name": "a"
+        },
+        "line": 4
+      },
+      {
+        "g_id": "b",
+        "type": "S3Bucket",
+        "fields": {
+          "bucket_name": "b"
+        },
+        "line": 5
+      },
+      {
+        "g_id": "c",
+        "type": "S3Bucket",
+        "fields": {
+          "bucket_name": "c"
+        },
+        "line": 6
+      },
+      {
+        "g_id": "d",
+        "type": "S3Bucket",
+        "fields": {
+          "bucket_name": "d"
+        },
+        "line": 7
+      },
+      {
+        "g_id": "e",
+        "type": "S3Bucket",
+        "fields": {
+          "bucket_name": "e"
+        },
+        "line": 8
+      }
+    ],
+    "edges": [],
+    "guards": []
+  },
+  "errors": [
+    {
+      "line": 4,
+      "includes": "unknown name \"nope\""
+    },
+    {
+      "line": 5,
+      "includes": "cannot interpolate \"things\""
+    },
+    {
+      "line": 6,
+      "includes": "attribute references cannot be interpolated"
+    },
+    {
+      "line": 7,
+      "includes": "bad name \"bad name\""
+    },
+    {
+      "line": 8,
+      "includes": "unterminated ${ in string"
+    }
+  ]
+}

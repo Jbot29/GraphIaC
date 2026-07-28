@@ -1,0 +1,86 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "one-b",
+        "type": "S3Bucket",
+        "fields": {
+          "region": "us-east-2",
+          "bucket_name": "one-b"
+        },
+        "line": 2
+      },
+      {
+        "g_id": "two-b",
+        "type": "S3Bucket",
+        "fields": {
+          "region": "us-east-2",
+          "bucket_name": "two-b"
+        },
+        "line": 2
+      },
+      {
+        "g_id": "three-b",
+        "type": "S3Bucket",
+        "fields": {
+          "bucket_name": "three-bucket",
+          "region": "us-east-2"
+        },
+        "line": 2
+      },
+      {
+        "g_id": "four-b",
+        "type": "S3Bucket",
+        "fields": {
+          "bucket_name": "four-bucket",
+          "region": "us-east-2"
+        },
+        "line": 2
+      }
+    ],
+    "edges": [],
+    "guards": []
+  },
+  "errors": [
+    {
+      "line": 3,
+      "includes": "constants are not allowed in a module body"
+    },
+    {
+      "line": 4,
+      "includes": "a module cannot define another module"
+    },
+    {
+      "line": 7,
+      "includes": "needs an argument for \"bucket\""
+    },
+    {
+      "line": 8,
+      "includes": "its arguments must all be named"
+    },
+    {
+      "line": 8,
+      "includes": "needs an argument for \"bucket\""
+    },
+    {
+      "line": 9,
+      "includes": "has no parameter \"nope\""
+    },
+    {
+      "line": 2,
+      "includes": "unknown name \"bucket\""
+    },
+    {
+      "line": 2,
+      "includes": "unknown name \"bucket\""
+    },
+    {
+      "line": 12,
+      "includes": "\"four\" is a module instance, not a node"
+    },
+    {
+      "line": 12,
+      "includes": "\"one\" is a module instance, not a node"
+    }
+  ]
+}

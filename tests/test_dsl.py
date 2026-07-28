@@ -110,3 +110,99 @@ def test_unclosed_paren_errors_with_statement_line():
     res = dsl.parse('hz : HostedZone(domain_name: "x.co"', REG)
     assert res["errors"][0]["line"] == 1
     assert "unclosed" in res["errors"][0]["msg"]
+
+
+def test_interpolation_takes_constants_not_node_labels():
+    """Deliberate: interpolation is parse-time, and a label's only value is
+    its own name — allowing it would read like a reference and not be one."""
+    src = 'bucket : S3Bucket\nfn : LambdaZipFile(name: "${bucket}-fn", runtime: "python3.13", handler: "h", zip_file_path: "z")'
+    res = dsl.parse(src, REG)
+    assert any("only constants can be interpolated" in e["msg"] for e in res["errors"])
+
+
+def test_interpolation_of_a_literal_dollar_brace_round_trips():
+    src = 'b : S3Bucket(bucket_name: "\\${x}")'
+    res = dsl.parse(src, REG)
+    assert res["errors"] == []
+    assert res["graph"]["nodes"][0]["fields"]["bucket_name"] == "${x}"
+    again = dsl.parse(dsl.desugar(res["graph"], REG), REG)
+    assert again["errors"] == []
+    assert again["graph"]["nodes"][0]["fields"]["bucket_name"] == "${x}"
+
+
+# --- modules ---------------------------------------------------------------
+
+EXAMPLES = Path(__file__).parent.parent / "examples" / "founding"
+
+
+def test_module_chapter_matches_the_hand_written_one():
+    """Chapter 6 is chapter 5 with the pattern named. The point of a module
+    is that it is *the same graph* — so assert exactly that, allowing only
+    the label prefix a module necessarily adds."""
+    hand = dsl.parse((EXAMPLES / "05-webapp" / "webapp.giac").read_text(), REG)
+    mod = dsl.parse((EXAMPLES / "06-module" / "webapp.giac").read_text(), REG)
+    assert hand["errors"] == [] and mod["errors"] == []
+
+    # 05 calls them lb/db/cluster/task-role/web; 06's module prefixes with
+    # the instance label. Nothing else may differ.
+    rename = {"lb": "web-lb", "db": "web-db", "cluster": "web-cluster",
+              "task-role": "web-task-role", "web": "web-app", "cert": "app-cert"}
+
+    def normalize(graph):
+        def g(x):
+            return rename.get(x, x)
+
+        def value(v):
+            if isinstance(v, dict) and "$ref" in v:
+                return {"$ref": {"g_id": g(v["$ref"]["g_id"]), "field": v["$ref"]["field"]}}
+            if isinstance(v, dict):
+                return {k: value(e) for k, e in v.items()}
+            if isinstance(v, list):
+                return [value(e) for e in v]
+            return v
+
+        nodes = sorted(
+            (g(n["g_id"]), n["type"], tuple(sorted((f, str(value(x))) for f, x in n["fields"].items())))
+            for n in graph["nodes"]
+        )
+        edges = sorted(
+            (e["type"], tuple(sorted((f, str(value(g(x)) if isinstance(x, str) else value(x)))
+                                     for f, x in e["fields"].items())))
+            for e in graph["edges"]
+        )
+        guards = sorted((x["predicate"], tuple(g(a) for a in x["args"])) for x in graph["guards"])
+        return nodes, edges, guards
+
+    h_nodes, h_edges, h_guards = normalize(hand["graph"])
+    m_nodes, m_edges, m_guards = normalize(mod["graph"])
+
+    # 05 names the instance's fields directly; 06 derives db_name/name from
+    # the instance label, so compare structure rather than every string
+    assert [n[0] for n in m_nodes] == [n[0] for n in h_nodes]
+    assert [n[1] for n in m_nodes] == [n[1] for n in h_nodes]
+    assert m_edges == h_edges
+    assert m_guards == h_guards
+
+
+def test_module_expansion_round_trips_through_desugar():
+    src = (EXAMPLES / "06-module" / "webapp.giac").read_text()
+    res = dsl.parse(src, REG)
+    assert res["errors"] == []
+    again = dsl.parse(dsl.desugar(res["graph"], REG), REG)
+    assert again["errors"] == []
+    assert shape(again["graph"]) == shape(res["graph"])
+
+
+def test_two_instances_do_not_collide():
+    src = (
+        'define pair(bucket-name) {\n'
+        '    b : S3Bucket(bucket_name: bucket-name)\n'
+        '    ? private(b)\n'
+        '}\n'
+        'one : pair(bucket-name: "one-bucket")\n'
+        'two : pair(bucket-name: "two-bucket")\n'
+    )
+    res = dsl.parse(src, REG)
+    assert res["errors"] == []
+    assert [n["g_id"] for n in res["graph"]["nodes"]] == ["one-b", "two-b"]
+    assert [g["args"] for g in res["graph"]["guards"]] == [["one-b"], ["two-b"]]

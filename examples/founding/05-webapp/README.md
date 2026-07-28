@@ -198,5 +198,8 @@ snapshot name until you delete the old one.
 
 ---
 
+**Next:** [Chapter 6 — the same stack, as a module](../06-module/) — once
+you've forked this file for the third project, name the pattern instead.
+
 **Back to:** [the founding kit](../) · **Or:** [chapter 3, the serverless
 track](../03-waitlist/)

@@ -5,9 +5,9 @@
 #   + an ACM certificate, DNS-validated automatically
 #   + pretty URLs (/about -> /about/index.html) via a CloudFront function
 #
-# Change the two names below. The hosted zone must already exist in
-# Route53 — buy the domain there, or point your registrar's nameservers
-# at it (README.md walks through both).
+# Change `company` below — it's the only name in the file. The hosted zone
+# must already exist in Route53: buy the domain there, or point your
+# registrar's nameservers at it (README.md walks through both).
 #
 #   python -m GraphIaC graphiac --infra_file site.giac run
 #
@@ -20,12 +20,12 @@
 #
 #   aws s3 cp index.html s3://yourco-com-site/ --profile graphiac
 
-domain    = "yourco.com"        # your domain (hosted zone must exist)
-site-name = "yourco-com-site"   # bucket names are globally unique
+company = "yourco"              # the only name in this file
+domain  = "${company}.com"      # your domain (hosted zone must exist)
 
 hz     : HostedZone(domain_name: domain)
 cert   : ACMCertificate(domain_name: domain)
-bucket : S3Bucket(bucket_name: site-name)
+bucket : S3Bucket("${company}-com-site")   # bucket names are globally unique
 cf     : CloudFrontDistribution(domain_name: domain)
 
 pretty-urls : CloudFrontFunction(comment: "Rewrite pretty URLs to index.html",

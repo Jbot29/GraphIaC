@@ -1,0 +1,12 @@
+define svc(bucket, region: "us-east-2") {
+    b : S3Bucket(bucket_name: bucket, region: region)
+    total = 3
+    define inner(x) { y : S3Bucket }
+}
+
+one   : svc()
+two   : svc("my-bucket")
+three : svc(bucket: "three-bucket", nope: 1)
+four  : svc(bucket: "four-bucket")
+
+four -> one

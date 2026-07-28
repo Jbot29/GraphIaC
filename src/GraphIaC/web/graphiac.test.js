@@ -143,3 +143,18 @@ test("an unclosed paren errors with the statement's line", () => {
   assert.strictEqual(res.errors[0].line, 1);
   assert.ok(res.errors[0].msg.includes("unclosed"));
 });
+
+test("interpolation takes constants, not node labels", () => {
+  const src = 'bucket : S3Bucket\nfn : LambdaZipFile(name: "${bucket}-fn", runtime: "python3.13", handler: "h", zip_file_path: "z")';
+  const res = K.parse(src, registry);
+  assert.ok(res.errors.some((e) => e.msg.includes("only constants can be interpolated")));
+});
+
+test("a literal ${ round-trips through desugar", () => {
+  const res = K.parse('b : S3Bucket(bucket_name: "\\${x}")', registry);
+  assert.deepEqual(res.errors, []);
+  assert.equal(res.graph.nodes[0].fields.bucket_name, "${x}");
+  const again = K.parse(K.desugar(res.graph, registry), registry);
+  assert.deepEqual(again.errors, []);
+  assert.equal(again.graph.nodes[0].fields.bucket_name, "${x}");
+});
