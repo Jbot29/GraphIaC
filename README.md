@@ -59,7 +59,7 @@ Open **http://127.0.0.1:8642**. You get:
 - **Diagram (right)** — the live graph. Solid arrows are provisioned connections (each one is an IAM policy, bucket policy, DNS record, or integration you didn't have to write). Dashed teal arrows are data dependencies.
 - **▷ plan** — diffs your source against the state DB and live AWS, and shows the result both as a log (`+` create, `~` update, `-` delete, `↳` import, `⊘` blocked) and as badges on the diagram.
 - **▶ run** — applies the plan to AWS (asks for confirmation first).
-- **✓ verify** — an independent audit: reads live AWS state and runs per-resource security/config checks.
+- **✓ verify** — an independent audit: reads live AWS state, runs per-resource security/config checks, and evaluates the file's `?` guards ([see below](#checks--is-that-bucket-public)).
 - **⇄ desugar** — shows your source with every shorthand resolved: constants substituted, inferred edge types written out, defaults made explicit.
 
 The SQLite state DB is created next to the infra file (`site.giac` → `site.db`).
@@ -74,16 +74,21 @@ The server binds `127.0.0.1` only and has **no authentication** — don't expose
 
 ## The Language in Sixty Seconds
 
-Five ideas, nothing more (full spec: [`dsl/spec.md`](dsl/spec.md)):
+A handful of ideas, nothing more (full spec: [`dsl/spec.md`](dsl/spec.md)):
 
 ```
 name = "value"              # a constant, substituted at parse time
+"${name}-site"              # …interpolated into a string
 label : Type(field: value)  # a node — the label IS its identity, and
                             #   defaults into the type's name field
 a -> b                      # an edge — its type is INFERRED from the
                             #   node-type pair; `: Type(args)` overrides
 other.field                 # an attribute reference — a data dependency
                             #   resolved from live AWS state at plan time
+? private(bucket)           # a guard — an invariant `verify` proves
+                            #   against live AWS (see below)
+define f(p) { … }           # a module — a parameterized subgraph,
+                            #   expanded at parse time
 # comment
 ```
 
@@ -92,6 +97,60 @@ other.field                 # an attribute reference — a data dependency
 **Edge inference:** every edge is uniquely determined by its endpoints — `cf -> bucket` can only mean the OAC edge, `cert -> hz` only DNS validation. You point; the edge knows. Arrow direction doesn't matter; the parser normalizes it.
 
 **Slow resources & BLOCKED:** some resources take hours to become usable (ACM certificate validation is the classic). There is no phase logic in the source. An edge can *gate* its destination — `cert -> cf` holds the distribution **`⊘ BLOCKED`** (greyed out in the diagram) until the certificate is ISSUED — and an attribute reference like `cert.arn` blocks the same way until it resolves from live AWS state. Blocked resources are simply skipped; run again later and the planner picks up where AWS left off.
+
+## Checks — is that bucket public?
+
+The scariest failure mode of infrastructure you built yourself is leaving something open to the internet and not knowing about it. A **guard** is an invariant written next to the thing it protects, in the same file:
+
+```
+bucket : S3Bucket("example-com-site")
+cf     : CloudFrontDistribution(domain_name: domain)
+
+cf -> bucket               # OAC: only this distribution can read
+
+? private(bucket)          # not publicly readable, ever
+? https-only(cf)           # viewers forced to HTTPS, modern TLS
+? locked-to(bucket, cf)    # only that distribution can read it
+```
+
+`verify` evaluates every guard against live AWS and exits non-zero on failure, so the same three lines are also a CI gate and a cron job:
+
+```bash
+python -m GraphIaC <profile> --infra_file site.giac verify
+```
+
+```
+✓ ? private(bucket)          public access blocked, no public grants
+✓ ? https-only(cf)           redirect-to-https, TLSv1.2_2021
+✗ ? locked-to(bucket, cf)    policy grants access beyond the distribution
+```
+
+**A guard checks reality, not your intent.** This is the whole distinction, and it's worth being precise about, because there are already tools here and they answer a different question. Checkov reads your HCL. OPA and Sentinel read the plan JSON. All three are asking *"does the code you wrote describe something safe?"* — a fair question, but not the one that keeps you up. None of them ever talks to AWS, so none can notice that somebody clicked a checkbox in the console at 2am, that a teammate widened a bucket policy by hand to unblock a demo, or that the thing you shipped in March quietly stopped matching the thing you wrote.
+
+`verify` talks to AWS. It reads the live bucket, the live distribution, the live security group, and tells you what is true right now.
+
+**The checking code is independent of the provisioning code.** Predicates live in one module (`guards.py`), are written against raw boto3, and are forbidden from calling the node and edge classes. Builder and auditor share vocabulary, not implementation — so a bug in `CloudFrontS3OACEdge` cannot also be the bug that makes `? locked-to(bucket, cf)` pass. Most infrastructure tools grade their own homework.
+
+And it lives in the same file as the thing it protects, not in a policy repo owned by a team you file tickets with. For a company of three people that's the difference between having a security review and not having one.
+
+Current predicates — a closed set, grown as examples need them:
+
+| guard | what it proves against live AWS |
+|---|---|
+| `? private(bucket)` | public access is blocked and the policy grants none |
+| `? locked-to(bucket, cf)` | only that one distribution can read the bucket |
+| `? https-only(cf)` | viewers are forced to HTTPS, with modern TLS |
+| `? cors-locked(api)` | the API's CORS allow-list names real origins, never `*` |
+| `? authed(fn)` | a Lambda with a public URL has auth wired in |
+| `? admin-only-signup(pool)` | nobody can sign themselves up |
+| `? db-private(db)` | the database has no public address and no open-to-the-world ingress |
+
+Two deliberate behaviours:
+
+- **Guards warn; they never block a `run`.** Being locked out of your own account at 2am is a failure mode too. (A `--strict` flag that blocks is a possible future.)
+- **A guard on a resource that doesn't exist yet reports `… pending`**, not failed — so a file that's half-BLOCKED behind a certificate doesn't cry wolf.
+
+Unknown predicates, wrong arity, and wrong target types are **parse errors**, flagged in the editor as you type.
 
 ## Headless CLI (no UI)
 
@@ -123,7 +182,11 @@ Worth knowing:
 
 ## What's in the Box
 
-Current node types: S3, CloudFront (distributions + functions), Route53, ACM, IAM roles, Lambda, DynamoDB, API Gateway (HTTP APIs), SES, and the edges that wire them together — DNS validation, OAC bucket policies, alias records, execution-role policies, route integrations + invoke permissions, and more. The full inference table is in [`dsl/spec.md`](dsl/spec.md); the sandbox's error messages will tell you when no edge exists between two types yet.
+Current node types: S3, CloudFront (distributions + functions), Route53, ACM, IAM roles, Lambda, DynamoDB, API Gateway (HTTP APIs), SES, Cognito, ALB, ECS on Fargate (clusters + services), ECR, and RDS Postgres — plus the edges that wire them together: DNS validation, OAC bucket policies, alias records, execution-role policies, route integrations + invoke permissions, security-group pairs, database credentials from Secrets Manager, and more. The full inference table is in [`dsl/spec.md`](dsl/spec.md); the sandbox's error messages will tell you when no edge exists between two types yet.
+
+**Security groups are deliberately not a node type.** A group with no rules is meaningless, and its rules are always about a *relationship* — "the load balancer may reach the tasks", "the tasks may reach the database". So each compute node owns exactly one group, created and destroyed with it, and the edges open the ports between them. `app -> db` is the rule.
+
+Worked examples live in [`examples/founding/`](examples/founding/) — six chapters taking an empty AWS account to a company on the internet, one `.giac` file each.
 
 ## Python API
 
