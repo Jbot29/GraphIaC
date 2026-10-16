@@ -61,6 +61,7 @@ Open **http://127.0.0.1:8642**. You get:
 - **▶ run** — applies the plan to AWS (asks for confirmation first).
 - **✓ verify** — an independent audit: reads live AWS state, runs per-resource security/config checks, and evaluates the file's `?` guards ([see below](#checks--is-that-bucket-public)).
 - **⇄ desugar** — shows your source with every shorthand resolved: constants substituted, inferred edge types written out, defaults made explicit.
+- **✎ agent** (optional) — a drawer where you ask for a change in English ("add a Postgres database behind web") or a question ("why is cf blocked?"). Claude answers with a proposed file, shown as a diff you accept or discard. It only appears when the SDK is installed and a key is set ([see below](#the-agent--optional)).
 
 The SQLite state DB is created next to the infra file (`site.giac` → `site.db`).
 
@@ -151,6 +152,33 @@ Two deliberate behaviours:
 - **A guard on a resource that doesn't exist yet reports `… pending`**, not failed — so a file that's half-BLOCKED behind a certificate doesn't cry wolf.
 
 Unknown predicates, wrong arity, and wrong target types are **parse errors**, flagged in the editor as you type.
+
+## The agent — optional
+
+```bash
+pip install "GraphIaC[agent]"
+export ANTHROPIC_API_KEY=sk-ant-…
+python -m GraphIaC <your-profile> --infra_file site.giac serve
+```
+
+With a key in the environment the UI grows a **✎ agent** button. The drawer
+sends Claude the whole language (grammar, every type and arrow the parser
+accepts, two worked examples), the open file, your last plan or verify
+output, and your request. It returns a complete new file or a prose answer.
+
+Three things make this safe to point at infrastructure:
+
+- **The language has no IAM syntax.** The model can only name nodes and draw
+  arrows. The edges write the policies, the same as when you type them.
+- **The parser checks the answer before you see it.** An invalid file goes
+  back to the model once with the parser's errors; what reaches the UI parses.
+- **It proposes, you decide.** Accept writes to the editor only. Save, plan,
+  run and verify remain your buttons, and the agent cannot press them.
+
+Model and cost: `claude-opus-5-5` by default (`GRAPHIAC_AGENT_MODEL` to
+change it). The language is sent as a cached system prompt, so a request
+costs a few cents at most. Without a key nothing changes: the button never
+appears.
 
 ## Headless CLI (no UI)
 

@@ -13,6 +13,7 @@ state DB.
     POST /api/plan       parse + load + plan                        {source, file?}
     POST /api/run        parse + load + run (applies to AWS!)       {source, file?}
     POST /api/verify     parse + load + verify                      {source, file?}
+    POST /api/agent      ask Claude to edit / explain the source    {source, request, file?, context?, history?}
 
 `file` is always workspace-relative (e.g. "newsletter/newsletter.giac");
 it defaults to the file `serve` was started with. State per script:
@@ -29,6 +30,10 @@ Design notes:
     ("busy") rather than queueing — the UI shows it and the user retries.
   - Binds 127.0.0.1 by default. There is no auth yet; do not bind wider
     until Cognito lands.
+  - The agent (agent.py) is optional: it exists when the Anthropic SDK is
+    installed and credentials are set; /api/files reports `agent` so the
+    UI knows whether to show the drawer. It only ever returns proposed
+    source — saving, planning and running stay with the person.
 
 Start it:  python -m GraphIaC <profile> --infra_file site.giac serve
 """
@@ -77,6 +82,7 @@ class Api:
         self.default_file = self.infra_path.name
         self.state_url = state_url  # s3://bucket[/prefix] — None = local .db
         self.lock = threading.Lock()  # one engine operation at a time
+        self.agent = None  # set lazily — see post_agent / agent_available
 
     def _resolve(self, file):
         """A workspace-relative .giac path -> (absolute Path, relative posix
@@ -108,7 +114,47 @@ class Api:
             for p in self.root.rglob("*.giac")
             if not any(part.startswith(".") for part in p.relative_to(self.root).parts)
         )
-        return 200, {"files": files, "default": self.default_file, "state": self.state_url}
+        return 200, {
+            "files": files,
+            "default": self.default_file,
+            "state": self.state_url,
+            "agent": self.agent_available(),
+        }
+
+    # ---- the agent ----
+    def agent_available(self):
+        if self.agent is not None:
+            return True
+        from GraphIaC import agent
+
+        return agent.available()
+
+    def post_agent(self, body):
+        """Ask the agent. No engine lock: it never touches state or AWS. The
+        answer is a proposal — the UI shows a diff and the person accepts it
+        into the editor (or not)."""
+        if "source" not in body or not body.get("request"):
+            return 400, {"error": 'missing "source" or "request"'}
+        if self.agent is None:
+            if not self.agent_available():
+                return 503, {"error": "agent not configured — pip install \"GraphIaC[agent]\" and set ANTHROPIC_API_KEY"}
+            from GraphIaC.agent import Agent
+
+            self.agent = Agent()
+        _, rel = self._resolve(body.get("file"))
+        files = self.get_files()[1]["files"]
+        try:
+            return 200, self.agent.ask(
+                body["source"],
+                body["request"],
+                file=rel,
+                files=files,
+                context=body.get("context"),
+                history=body.get("history") or (),
+            )
+        except Exception as e:  # noqa: BLE001 — surface model/API failures as JSON, keep serving
+            logger.error(f"agent error: {e}")
+            return 502, {"error": f"{e.__class__.__name__}: {e}"}
 
     # ---- source file ----
     def get_source(self, file=None):
@@ -260,6 +306,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/plan": self.api.post_plan,
             "/api/run": self.api.post_run,
             "/api/verify": self.api.post_verify,
+            "/api/agent": self.api.post_agent,
         }
         if path not in routes:
             return self._json(404, {"error": "not found"})
