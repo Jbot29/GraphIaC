@@ -147,7 +147,7 @@ def handler(event, context):
             return _respond(405, json.dumps({"error": "POST required"}),
                             "application/json", headers={"Allow": "POST"})
         route = {"/api/plan": api.post_plan, "/api/run": api.post_run,
-                 "/api/verify": api.post_verify}.get(req["path"])
+                 "/api/verify": api.post_verify, "/api/agent": api.post_agent}.get(req["path"])
         if not route:
             return _json((404, {"error": "not found"}))
         try:

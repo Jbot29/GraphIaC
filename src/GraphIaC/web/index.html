@@ -90,6 +90,28 @@
   .view .cap b { color:var(--vermilion); font-weight:500; }
   #graph { width:100%; flex:1; min-height:0; display:block; cursor:grab; touch-action:none; }
   #graph:active { cursor:grabbing; }
+
+  /* the agent drawer (server mode, when credentials exist): a conversation
+     that proposes source; the person accepts a diff or doesn't */
+  #agent { flex:none; max-height:48%; display:flex; flex-direction:column; gap:6px; min-height:0; }
+  #agent[hidden] { display:none; }
+  #agentLog { flex:1; min-height:60px; overflow:auto; margin:0; background:var(--paper-deep);
+    border:2px solid var(--ink); font-size:11px; line-height:1.55; padding:8px 12px; white-space:pre-wrap; }
+  #agentLog .you { color:var(--ink-soft); }
+  #agentLog .them { color:var(--ink); }
+  #agentLog .them::before { content:"✎ "; color:var(--vermilion); }
+  #agentDiff { flex:none; max-height:50%; display:flex; flex-direction:column; gap:6px; min-height:0; }
+  #agentDiff[hidden] { display:none; }
+  #diffBody { flex:1; overflow:auto; margin:0; background:#fbf8ef; border:2px dashed var(--vermilion);
+    font-size:11px; line-height:1.55; padding:8px 12px; white-space:pre; }
+  #diffBody .add { background:rgba(31,122,109,0.16); color:var(--teal); }
+  #diffBody .del { background:rgba(200,69,31,0.12); color:var(--vermilion); text-decoration:line-through; }
+  #diffBody .ctx { color:var(--ink-soft); }
+  #agentForm { display:flex; gap:8px; flex:none; align-items:stretch; }
+  #agentInput { flex:1; resize:none; background:#fbf8ef; border:2px solid var(--ink); color:var(--ink);
+    font-family:var(--mono); font-size:12px; line-height:1.5; padding:6px 10px; }
+  #agentInput:focus { outline:none; border-color:var(--water); }
+  #agentInput:disabled { opacity:0.6; }
 </style>
 </head>
 <body>
@@ -132,6 +154,7 @@ cf   -> hz : (domain_name: domain)
           <button id="planBtn" title="diff code / state DB / live AWS">▷ plan</button>
           <button id="runBtn" title="apply the plan to AWS">▶ run</button>
           <button id="verifyBtn" class="ghost" title="audit live AWS state">✓ verify</button>
+          <button id="agentBtn" class="ghost" hidden title="ask Claude to edit or explain this file — you accept the diff; nothing runs">✎ agent</button>
         </span>
         <span id="status">ready</span>
       </div>
@@ -145,6 +168,23 @@ cf   -> hz : (domain_name: domain)
       <div class="view">
         <div class="cap"><span><b>solid</b> = provisioned · dashed = data dependency</span><span>wheel = zoom · drag = pan · double-click = fit</span></div>
         <svg id="graph"></svg>
+      </div>
+      <div id="agent" hidden>
+        <div class="panel-label"><span>Agent</span><span class="hint">it proposes · you accept the diff · nothing runs</span></div>
+        <pre id="agentLog">Ask for a change ("add a Postgres database behind web") or a question ("why is cf blocked?").
+The language has no IAM syntax, so the answer can only ever be nodes and arrows — and it is parsed before you see it.</pre>
+        <div id="agentDiff" hidden>
+          <pre id="diffBody"></pre>
+          <div class="controls">
+            <button id="acceptBtn">✓ accept into editor</button>
+            <button id="discardBtn" class="ghost">discard</button>
+            <span id="diffNote" class="hint" style="font-size:11px;color:var(--ink-soft);margin-left:auto"></span>
+          </div>
+        </div>
+        <form id="agentForm">
+          <textarea id="agentInput" rows="2" spellcheck="false" placeholder="add a bucket for uploads, private, behind cf…   (enter to send, shift+enter for a newline)"></textarea>
+          <button type="submit" id="askBtn">ask</button>
+        </form>
       </div>
     </div>
   </div>
@@ -501,6 +541,8 @@ async function openFile(f, { keepEditor = false } = {}) {
   if (!(keepEditor && !src.trim())) editor.value = src;
   renderFileList();
   refresh();  // reparses and clears OPS — another script's plan verdicts don't apply here
+  agentHistory.length = 0;  // a conversation is about one file
+  hideDiff();
 }
 filePick.addEventListener("change", () => openFile(filePick.value));
 editor.addEventListener("input", () => {
@@ -521,6 +563,10 @@ document.getElementById("newFileBtn").addEventListener("click", async () => {
     if (!data) return;
     serverBar.hidden = false;
     fileBar.hidden = false;
+    if (data.agent) {
+      agentBtn.hidden = false;
+      try { if (localStorage.getItem("graphiac.agent.open") === "1") agentPanel.hidden = false; } catch (e) { /* no storage */ }
+    }
     if (data.state) {
       const hint = document.querySelector(".panel-label .hint");
       if (hint) hint.textContent = "state: " + data.state + " (runs lock)";
@@ -601,6 +647,118 @@ document.getElementById("verifyBtn").addEventListener("click", async () => {
   } catch (e) {
     logLines([`<span class="fail">✗ ${esc(String(e))}</span>`]);
   }
+});
+
+/* =====================================================================
+ * THE AGENT DRAWER — the LLM handles expression, the parser constrains
+ * it (server-side, before the reply arrives), the human inspects the
+ * diff. Accept writes to the editor only; save/plan/run stay buttons.
+ * =================================================================== */
+const agentBtn = document.getElementById("agentBtn");
+const agentPanel = document.getElementById("agent");
+const agentLog = document.getElementById("agentLog");
+const agentDiff = document.getElementById("agentDiff");
+const diffBody = document.getElementById("diffBody");
+const diffNote = document.getElementById("diffNote");
+const agentInput = document.getElementById("agentInput");
+const askBtn = document.getElementById("askBtn");
+const agentHistory = [];     // {role, text} for the open file
+let proposed = null;         // source awaiting accept/discard
+
+agentBtn.addEventListener("click", () => {
+  agentPanel.hidden = !agentPanel.hidden;
+  try { localStorage.setItem("graphiac.agent.open", agentPanel.hidden ? "0" : "1"); } catch (e) { /* no storage */ }
+  if (!agentPanel.hidden) agentInput.focus();
+});
+
+function agentSay(cls, text) {
+  if (agentLog.dataset.fresh !== "1") { agentLog.textContent = ""; agentLog.dataset.fresh = "1"; }
+  const line = document.createElement("div");
+  line.className = cls;
+  line.textContent = text;
+  agentLog.appendChild(line);
+  agentLog.scrollTop = agentLog.scrollHeight;
+  return line;
+}
+
+/* line diff: longest common subsequence, plenty for forty-line files */
+function diffLines(a, b) {
+  const A = a.split("\n"), B = b.split("\n");
+  const n = A.length, m = B.length;
+  const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const out = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { out.push(["ctx", A[i]]); i++; j++; }
+    else if (L[i + 1][j] >= L[i][j + 1]) { out.push(["del", A[i++]]); }
+    else { out.push(["add", B[j++]]); }
+  }
+  while (i < n) out.push(["del", A[i++]]);
+  while (j < m) out.push(["add", B[j++]]);
+  return out;
+}
+const DIFF_SYM = { ctx: "  ", add: "+ ", del: "- " };
+function showDiff(src, errors) {
+  proposed = src;
+  diffBody.innerHTML = diffLines(editor.value, src)
+    .map(([k, s]) => `<span class="${k}">${DIFF_SYM[k]}${esc(s)}</span>`).join("\n");
+  const changed = diffBody.querySelectorAll(".add, .del").length;
+  if (errors && errors.length) {
+    diffNote.textContent = "⚠ does not parse — " + errors[0].msg;
+    document.getElementById("acceptBtn").textContent = "accept anyway";
+  } else {
+    diffNote.textContent = changed + " line" + (changed === 1 ? "" : "s") + " changed · unsaved until you save";
+    document.getElementById("acceptBtn").textContent = "✓ accept into editor";
+  }
+  agentDiff.hidden = false;
+}
+function hideDiff() { proposed = null; agentDiff.hidden = true; }
+
+document.getElementById("acceptBtn").addEventListener("click", () => {
+  if (proposed === null) return;
+  editor.value = proposed;
+  if (currentFile !== null) buffers.set(currentFile, editor.value);
+  renderFileList();
+  refresh();
+  hideDiff();
+  statusEl.textContent = "agent edit accepted — review, then save";
+});
+document.getElementById("discardBtn").addEventListener("click", () => {
+  hideDiff();
+  agentSay("you", "(discarded)");
+});
+
+document.getElementById("agentForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const request = agentInput.value.trim();
+  if (!request) return;
+  agentInput.value = "";
+  agentSay("you", "> " + request);
+  const pending = agentSay("them", "thinking…");
+  askBtn.disabled = agentInput.disabled = true;
+  try {
+    const { status, data } = await api("/api/agent", {
+      source: editor.value, request, file: currentFile,
+      context: oplog.hidden ? null : oplog.textContent,   // the last plan/run/verify, as the person saw it
+      history: agentHistory.slice(-8),
+    });
+    if (data.error) { pending.textContent = (status === 503 ? "not configured: " : "✗ ") + data.error; return; }
+    pending.textContent = data.reply || "(no reply)";
+    agentHistory.push({ role: "user", text: request }, { role: "assistant", text: data.reply || "" });
+    if (typeof data.source === "string" && data.source !== editor.value) showDiff(data.source, data.errors);
+    else hideDiff();
+  } catch (err) {
+    pending.textContent = "✗ " + String(err);
+  } finally {
+    askBtn.disabled = agentInput.disabled = false;
+    agentInput.focus();
+  }
+});
+agentInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); document.getElementById("agentForm").requestSubmit(); }
 });
 </script>
 </body>
