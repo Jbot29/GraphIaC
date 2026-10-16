@@ -14,6 +14,9 @@ state DB.
     POST /api/run        parse + load + run (applies to AWS!)       {source, file?}
     POST /api/verify     parse + load + verify                      {source, file?}
     POST /api/agent      ask Claude to edit / explain the source    {source, request, file?, context?, history?}
+    GET  /api/history    source snapshots, newest first              ?file=…            {versions}
+    GET  /api/history    one snapshot with its text                  ?file=…&id=N       {version}
+    POST /api/snapshot   record an accepted agent edit               {source, file?, event, message?}
 
 `file` is always workspace-relative (e.g. "newsletter/newsletter.giac");
 it defaults to the file `serve` was started with. State per script:
@@ -30,6 +33,10 @@ Design notes:
     ("busy") rather than queueing — the UI shows it and the user retries.
   - Binds 127.0.0.1 by default. There is no auth yet; do not bind wider
     until Cognito lands.
+  - Source history lives in the same per-script DB as the state (table
+    `source_versions`, db.py): every save, accepted agent edit, and run.
+    With `--state s3://…` only run snapshots are recorded — they ride the
+    run's publish; a save never touches S3, so there is nowhere to put one.
   - The agent (agent.py) is optional: it exists when the Anthropic SDK is
     installed and credentials are set; /api/files reports `agent` so the
     UI knows whether to show the drawer. It only ever returns proposed
@@ -47,7 +54,9 @@ from urllib.parse import parse_qs, urlparse
 
 import GraphIaC
 from GraphIaC import dsl
+from GraphIaC.db import SOURCE_EVENTS, create_tables, get_version, list_versions, record_source
 from GraphIaC.dsl import BlockedItem
+from GraphIaC.main import summarize_ops
 from GraphIaC.models import BaseEdge
 
 from .logs import setup_logger
@@ -172,7 +181,53 @@ class Api:
             return 400, {"error": f'not a .giac file in the workspace: {body.get("file")}'}
         path.parent.mkdir(parents=True, exist_ok=True)  # new scripts may sit in new subdirs
         path.write_text(body["source"])
-        return 200, {"saved": True, "file": rel, "path": str(path)}
+        version = self._snapshot(path, body["source"], "save")
+        return 200, {"saved": True, "file": rel, "path": str(path), "version": version}
+
+    # ---- source history ----
+    def _snapshot(self, path, source, event, message=None):
+        """Record a save/agent snapshot in the script's local DB. None in S3
+        mode: the DB there only moves on run (see the module docstring)."""
+        if self.state_url:
+            return None
+        conn = sqlite3.connect(str(path.with_suffix(".db")))
+        try:
+            create_tables(conn)
+            return record_source(conn, source, event, message)
+        finally:
+            conn.close()
+
+    def post_snapshot(self, body):
+        if "source" not in body or body.get("event") not in SOURCE_EVENTS or body.get("event") == "run":
+            return 400, {"error": 'missing "source", or event not one of save|agent'}
+        path, rel = self._resolve(body.get("file"))
+        if not path:
+            return 400, {"error": f'not a .giac file in the workspace: {body.get("file")}'}
+        version = self._snapshot(path, body["source"], body["event"], body.get("message"))
+        if version is None and self.state_url:
+            return 200, {"version": None, "note": "save/agent snapshots are not recorded with --state s3://… (run snapshots are)"}
+        return 200, {"version": version, "file": rel}
+
+    def get_history(self, file=None, version_id=None):
+        """The snapshots for a script — read lock-free, like plan."""
+        path, rel = self._resolve(file)
+        if not path:
+            return 400, {"error": f"not a .giac file in the workspace: {file}"}
+        backend = self._backend(Path(rel).with_suffix(".db").as_posix())
+        try:
+            db_path = backend.fetch() if backend else str(path.with_suffix(".db"))
+            conn = sqlite3.connect(db_path)
+            try:
+                create_tables(conn)
+                if version_id is not None:
+                    v = get_version(conn, version_id)
+                    return (200, {"version": v, "file": rel}) if v else (404, {"error": f"no version {version_id}"})
+                return 200, {"versions": list_versions(conn), "file": rel, "state": self.state_url}
+            finally:
+                conn.close()
+        finally:
+            if backend:
+                backend.cleanup()
 
     # ---- engine ----
     def _load(self, source, path, backend=None):
@@ -249,8 +304,15 @@ class Api:
 
     def post_run(self, body):
         def go(state, blocked):
-            applied = [_op_json(o) for o in GraphIaC.run(state, blocked)]
-            return 200, {"applied": applied, "guards": self._guards(body["source"])}
+            ops = None
+            try:
+                ops = GraphIaC.run(state, blocked)
+            finally:
+                # the file as applied — recorded even after a partial run,
+                # on the same connection, so in S3 mode it publishes with the state
+                version = record_source(state.db_conn, body["source"], "run", summarize_ops(ops))
+            applied = [_op_json(o) for o in ops]
+            return 200, {"applied": applied, "guards": self._guards(body["source"]), "version": version}
 
         return self._engine(body, go, s3_lock_op="run")
 
@@ -295,6 +357,12 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/source":
             file = parse_qs(url.query).get("file", [None])[0]
             return self._json(*self.api.get_source(file))
+        if url.path == "/api/history":
+            q = parse_qs(url.query)
+            vid = q.get("id", [None])[0]
+            if vid is not None and not vid.isdigit():
+                return self._json(400, {"error": "id must be an integer"})
+            return self._json(*self.api.get_history(q.get("file", [None])[0], int(vid) if vid else None))
         if url.path.startswith("/api/"):
             return self._json(404, {"error": "not found"})
         return self._static(url.path)
@@ -307,6 +375,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/run": self.api.post_run,
             "/api/verify": self.api.post_verify,
             "/api/agent": self.api.post_agent,
+            "/api/snapshot": self.api.post_snapshot,
         }
         if path not in routes:
             return self._json(404, {"error": "not found"})

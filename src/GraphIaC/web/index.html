@@ -102,11 +102,19 @@
   #agentLog .them::before { content:"✎ "; color:var(--vermilion); }
   #agentDiff { flex:none; max-height:50%; display:flex; flex-direction:column; gap:6px; min-height:0; }
   #agentDiff[hidden] { display:none; }
-  #diffBody { flex:1; overflow:auto; margin:0; background:#fbf8ef; border:2px dashed var(--vermilion);
+  .diff { flex:1; overflow:auto; margin:0; background:#fbf8ef; border:2px dashed var(--vermilion);
     font-size:11px; line-height:1.55; padding:8px 12px; white-space:pre; }
-  #diffBody .add { background:rgba(31,122,109,0.16); color:var(--teal); }
-  #diffBody .del { background:rgba(200,69,31,0.12); color:var(--vermilion); text-decoration:line-through; }
-  #diffBody .ctx { color:var(--ink-soft); }
+  .diff .add { background:rgba(31,122,109,0.16); color:var(--teal); }
+  .diff .del { background:rgba(200,69,31,0.12); color:var(--vermilion); text-decoration:line-through; }
+  .diff .ctx { color:var(--ink-soft); }
+
+  /* history: every save, accepted agent edit, and run for the open script */
+  #history { flex:none; max-height:40%; display:flex; flex-direction:column; gap:6px; min-height:0; }
+  #history[hidden] { display:none; }
+  #versionPick { font-family:var(--mono); font-size:11px; background:#fbf8ef; color:var(--ink);
+    border:2px solid var(--ink); padding:3px 4px; max-width:60%; }
+  #versionPick:focus { outline:none; border-color:var(--water); }
+  #historyDiff { border-color:var(--water); min-height:40px; }
   #agentForm { display:flex; gap:8px; flex:none; align-items:stretch; }
   #agentInput { flex:1; resize:none; background:#fbf8ef; border:2px solid var(--ink); color:var(--ink);
     font-family:var(--mono); font-size:12px; line-height:1.5; padding:6px 10px; }
@@ -154,6 +162,7 @@ cf   -> hz : (domain_name: domain)
           <button id="planBtn" title="diff code / state DB / live AWS">▷ plan</button>
           <button id="runBtn" title="apply the plan to AWS">▶ run</button>
           <button id="verifyBtn" class="ghost" title="audit live AWS state">✓ verify</button>
+          <button id="historyBtn" class="ghost" title="every save, accepted agent edit, and run of this script — pick one, see the diff, restore it">↺ history</button>
           <button id="agentBtn" class="ghost" hidden title="ask Claude to edit or explain this file — you accept the diff; nothing runs">✎ agent</button>
         </span>
         <span id="status">ready</span>
@@ -161,6 +170,15 @@ cf   -> hz : (domain_name: domain)
       <pre id="issues" hidden></pre>
       <pre id="oplog" hidden></pre>
       <pre id="desugared" hidden></pre>
+      <div id="history" hidden>
+        <div class="panel-label"><span>History</span><span class="hint">save · agent · run — restoring would change the lines below</span></div>
+        <div class="controls">
+          <select id="versionPick" title="snapshots, newest first"></select>
+          <button id="restoreBtn" class="ghost" title="put this version in the editor — unsaved until you save; plan + run to roll AWS back">↺ restore into editor</button>
+          <span id="historyNote" style="font-size:11px;color:var(--ink-soft);margin-left:auto"></span>
+        </div>
+        <pre id="historyDiff" class="diff" hidden></pre>
+      </div>
     </div>
 
     <div class="col">
@@ -174,7 +192,7 @@ cf   -> hz : (domain_name: domain)
         <pre id="agentLog">Ask for a change ("add a Postgres database behind web") or a question ("why is cf blocked?").
 The language has no IAM syntax, so the answer can only ever be nodes and arrows — and it is parsed before you see it.</pre>
         <div id="agentDiff" hidden>
-          <pre id="diffBody"></pre>
+          <pre id="diffBody" class="diff"></pre>
           <div class="controls">
             <button id="acceptBtn">✓ accept into editor</button>
             <button id="discardBtn" class="ghost">discard</button>
@@ -608,7 +626,9 @@ async function engine(path, waitMsg) {
     const lines = ops.length ? ops.map(opLine)
       : [`<span class="ok">✓ no changes — infrastructure is up to date</span>`];
     if ((data.guards || []).length) lines.push("", ...guardLines(data.guards));
+    if (data.version) lines.push("", `<span class="op-blocked">source snapshot v${data.version.id} (${esc(data.version.message || "")})</span>`);
     logLines(lines);
+    if (data.version && !historyPanel.hidden) loadHistory();
   } catch (e) {
     logLines([`<span class="fail">✗ ${esc(String(e))}</span>`]);
   }
@@ -623,8 +643,9 @@ document.getElementById("saveBtn").addEventListener("click", async () => {
   if (data.saved) {
     savedSrc.set(currentFile, editor.value);
     buffers.set(currentFile, editor.value);
-    statusEl.textContent = "saved → " + (data.file || data.path);
+    statusEl.textContent = "saved → " + (data.file || data.path) + (data.version ? " · v" + data.version.id : "");
     loadFiles();  // a brand-new script now exists on disk — refresh the list
+    if (!historyPanel.hidden) loadHistory();
   } else {
     statusEl.textContent = "save failed" + (data.error ? ": " + data.error : "");
   }
@@ -664,6 +685,7 @@ const agentInput = document.getElementById("agentInput");
 const askBtn = document.getElementById("askBtn");
 const agentHistory = [];     // {role, text} for the open file
 let proposed = null;         // source awaiting accept/discard
+let proposedFor = "";        // the request that produced it — the snapshot's message
 
 agentBtn.addEventListener("click", () => {
   agentPanel.hidden = !agentPanel.hidden;
@@ -717,14 +739,20 @@ function showDiff(src, errors) {
 }
 function hideDiff() { proposed = null; agentDiff.hidden = true; }
 
-document.getElementById("acceptBtn").addEventListener("click", () => {
+document.getElementById("acceptBtn").addEventListener("click", async () => {
   if (proposed === null) return;
-  editor.value = proposed;
+  const src = proposed, why = proposedFor;
+  editor.value = src;
   if (currentFile !== null) buffers.set(currentFile, editor.value);
   renderFileList();
   refresh();
   hideDiff();
   statusEl.textContent = "agent edit accepted — review, then save";
+  try {  // history: the accepted edit, with the request as its message
+    const { data } = await api("/api/snapshot", { source: src, file: currentFile, event: "agent", message: why });
+    if (data.version) statusEl.textContent += " · v" + data.version.id;
+    if (!historyPanel.hidden) loadHistory();
+  } catch (e) { /* history is a convenience; the edit stands */ }
 });
 document.getElementById("discardBtn").addEventListener("click", () => {
   hideDiff();
@@ -748,7 +776,7 @@ document.getElementById("agentForm").addEventListener("submit", async (e) => {
     if (data.error) { pending.textContent = (status === 503 ? "not configured: " : "✗ ") + data.error; return; }
     pending.textContent = data.reply || "(no reply)";
     agentHistory.push({ role: "user", text: request }, { role: "assistant", text: data.reply || "" });
-    if (typeof data.source === "string" && data.source !== editor.value) showDiff(data.source, data.errors);
+    if (typeof data.source === "string" && data.source !== editor.value) { proposedFor = request; showDiff(data.source, data.errors); }
     else hideDiff();
   } catch (err) {
     pending.textContent = "✗ " + String(err);
@@ -759,6 +787,68 @@ document.getElementById("agentForm").addEventListener("submit", async (e) => {
 });
 agentInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); document.getElementById("agentForm").requestSubmit(); }
+});
+
+/* =====================================================================
+ * HISTORY — the state DB knows what was deployed; it also knows what you
+ * wrote. Pick a snapshot, see what restoring would change, restore it
+ * into the editor. Rolling AWS back is then save, plan, run.
+ * =================================================================== */
+const historyPanel = document.getElementById("history");
+const versionPick = document.getElementById("versionPick");
+const historyDiff = document.getElementById("historyDiff");
+const historyNote = document.getElementById("historyNote");
+let versionSource = null;    // text of the selected snapshot
+
+document.getElementById("historyBtn").addEventListener("click", () => {
+  historyPanel.hidden = !historyPanel.hidden;
+  if (!historyPanel.hidden) loadHistory();
+});
+
+function fmtVersion(v) {
+  const when = v.ts.replace("T", " ").replace(/\+00:00$/, "Z");
+  return `v${v.id} · ${when} · ${v.event}` + (v.message ? ` · ${v.message}` : "");
+}
+async function loadHistory() {
+  versionPick.innerHTML = "";
+  historyDiff.hidden = true;
+  versionSource = null;
+  const { status, data } = await api("/api/history?file=" + encodeURIComponent(currentFile || ""));
+  if (status !== 200) { historyNote.textContent = data.error || "history unavailable"; return; }
+  if (!data.versions.length) {
+    historyNote.textContent = data.state ? "no snapshots yet — with --state s3 only runs are recorded"
+                                          : "no snapshots yet — save, accept an agent edit, or run";
+    return;
+  }
+  for (const v of data.versions) {
+    const o = document.createElement("option");
+    o.value = v.id;
+    o.textContent = fmtVersion(v);
+    versionPick.appendChild(o);
+  }
+  historyNote.textContent = data.versions.length + " snapshot" + (data.versions.length === 1 ? "" : "s");
+  await showVersion(data.versions[0].id);
+}
+async function showVersion(id) {
+  const { status, data } = await api(`/api/history?file=${encodeURIComponent(currentFile || "")}&id=${id}`);
+  if (status !== 200) { historyNote.textContent = data.error; return; }
+  versionSource = data.version.source;
+  const rows = diffLines(editor.value, versionSource);
+  const changed = rows.filter(([k]) => k !== "ctx").length;
+  historyDiff.innerHTML = rows.map(([k, s]) => `<span class="${k}">${DIFF_SYM[k]}${esc(s)}</span>`).join("\n");
+  historyDiff.hidden = false;
+  historyNote.textContent = changed ? changed + " line" + (changed === 1 ? "" : "s") + " differ from the editor"
+                                    : "identical to the editor";
+}
+versionPick.addEventListener("change", () => showVersion(versionPick.value));
+document.getElementById("restoreBtn").addEventListener("click", () => {
+  if (versionSource === null) return;
+  editor.value = versionSource;
+  if (currentFile !== null) buffers.set(currentFile, editor.value);
+  renderFileList();
+  refresh();
+  historyDiff.hidden = true;
+  historyNote.textContent = "restored v" + versionPick.value + " — save, then plan and run to roll AWS back";
 });
 </script>
 </body>

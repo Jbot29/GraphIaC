@@ -49,7 +49,7 @@ Auto-bumps the patch version in `pyproject.toml`, builds, and uploads. User must
 
 ### Core Engine (`src/GraphIaC/main.py`)
 
-Six public functions form the user-facing API: `init()`, `add_node()`, `add_edge()`, `plan()`, `run()`, `verify()`.
+Six public functions form the user-facing API: `init()`, `add_node()`, `add_edge()`, `plan()`, `run()`, `verify()`. `summarize_ops(changes)` renders a run's result as a short string (`+2 ~1`, `no changes`, `run failed`) for source-history messages.
 
 - `init(session, db_conn)` → `GraphIaCState`: creates a NetworkX DiGraph and connects to the SQLite state DB
 - `plan(state)`: reads current AWS state for every node/edge via boto3, diffs against the local DB, returns a list of `(operation, item)` tuples where operation ∈ `{CREATE, UPDATE, DELETE, IMPORT}`
@@ -66,7 +66,7 @@ AWS live state  ↔  SQLite DB (last applied)  ↔  Code definition
                   Diff → CREATE | IMPORT | UPDATE | DELETE
 ```
 
-SQLite has two tables: `nodes` and `edges`, each storing JSON-serialized Pydantic models. `db.py` owns all reads/writes.
+SQLite has three tables: `nodes` and `edges`, each storing JSON-serialized Pydantic models, and `source_versions` — snapshots of the `.giac` text (events `save` | `agent` | `run`; save/agent dedupe on content hash, run always records with `summarize_ops()` as its message). `db.py` owns all reads/writes. Rollback is restore-the-text + plan + run; there is no engine support and should not be. CLI: `history` / `history --at N`. In `--state s3://…` mode only run snapshots are recorded (they publish with the run).
 
 ### Node and Edge Base Classes (`src/GraphIaC/models.py`)
 

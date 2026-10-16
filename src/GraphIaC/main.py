@@ -161,6 +161,20 @@ def plan(state, blocked=None):
     return plan_ops
 
 
+def summarize_ops(changes):
+    """A run's result in a few words — the message on its source snapshot."""
+    if changes is None:
+        return "run failed"
+    if not changes:
+        return "no changes"
+    sym = {OperationType.CREATE: "+", OperationType.CREATE_EDGE: "+", OperationType.UPDATE: "~",
+           OperationType.DELETE: "-", OperationType.IMPORT: "↳", OperationType.BLOCKED: "⊘"}
+    counts = {}
+    for c in changes:
+        counts[c.operation] = counts.get(c.operation, 0) + 1
+    return " ".join(f"{sym[op]}{n}" for op, n in counts.items())
+
+
 def run(state, blocked=None):
     logger.plan("Planning...")
     changes = plan(state, blocked)

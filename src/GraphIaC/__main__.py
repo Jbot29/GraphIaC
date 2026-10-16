@@ -71,13 +71,15 @@ def main():
     parser.add_argument("--port", type=int, default=8642, help="Port for the serve command")
     parser.add_argument("--all", action="store_true",
                         help="policy: cover every registered type, not just the infra file's")
+    parser.add_argument("--at", type=int, metavar="ID",
+                        help="history: print that snapshot's source instead of the list")
     parser.add_argument("--state",
                         help="Keep state in S3 instead of a local .db: s3://bucket[/prefix]. "
                              "run locks (conditional writes); plan/verify read lock-free")
     parser.add_argument(
         "command",
-        choices=["plan", "run", "diagram", "verify", "serve", "policy", "unlock"],
-        help="The command to run (e.g., plan, run, verify, serve, policy, unlock)",
+        choices=["plan", "run", "diagram", "verify", "serve", "policy", "unlock", "history"],
+        help="The command to run (e.g., plan, run, verify, serve, policy, unlock, history)",
     )
 
     args = parser.parse_args()
@@ -143,6 +145,16 @@ def main():
     else:
         db_conn = sqlite3.connect(base + ".db")
 
+    if args.command == "history":
+        # deliberately before load_infra: history matters most when the file is broken
+        try:
+            _history(db_conn, args.at)
+        finally:
+            db_conn.close()
+            if backend:
+                backend.cleanup()
+        return
+
     gioc = GraphIaC.init(session, db_conn)
     blocked = load_infra(gioc, args.infra_file)
 
@@ -151,6 +163,38 @@ def main():
     finally:
         if backend:
             backend.cleanup()  # idempotent; run's own publish/release ran already
+
+
+def _snapshot_run(db_conn, path, applied):
+    """Record the .giac as it was for this run (even a failed one)."""
+    if not path.endswith(".giac"):
+        return
+    from GraphIaC.db import record_source
+    from GraphIaC.main import summarize_ops
+
+    with open(path) as f:
+        record_source(db_conn, f.read(), "run", summarize_ops(applied))
+
+
+def _history(db_conn, at=None):
+    from GraphIaC.db import create_tables, get_version, list_versions
+
+    create_tables(db_conn)
+    if at is not None:
+        v = get_version(db_conn, at)
+        if not v:
+            logger.error(f"no version {at}")
+            raise SystemExit(1)
+        print(v["source"], end="")  # `--at N > site.giac` restores it
+        return
+    versions = list_versions(db_conn)
+    if not versions:
+        logger.info("no history yet — snapshots are taken on save, agent accept, and run")
+        return
+    for v in versions:
+        msg = f"  {v['message']}" if v["message"] else ""
+        logger.plan(f"  v{v['id']:<4} {v['ts']}  {v['event']:<5}{msg}")
+    logger.info("restore one:  --at N > file.giac   then plan, then run")
 
 
 def _dispatch(args, gioc, blocked, backend, session, base, db_conn):
@@ -162,9 +206,11 @@ def _dispatch(args, gioc, blocked, backend, session, base, db_conn):
             logger.info(f"\tChange: {change.operation} {change.obj}")
 
     elif args.command == "run":
+        applied = None
         try:
-            GraphIaC.run(gioc, blocked)
+            applied = GraphIaC.run(gioc, blocked)
         finally:
+            _snapshot_run(db_conn, args.infra_file, applied)
             if backend:
                 # publish even after a partial run — recording what WAS
                 # created beats orphaning it; then always release

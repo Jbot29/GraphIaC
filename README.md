@@ -61,6 +61,7 @@ Open **http://127.0.0.1:8642**. You get:
 - **▶ run** — applies the plan to AWS (asks for confirmation first).
 - **✓ verify** — an independent audit: reads live AWS state, runs per-resource security/config checks, and evaluates the file's `?` guards ([see below](#checks--is-that-bucket-public)).
 - **⇄ desugar** — shows your source with every shorthand resolved: constants substituted, inferred edge types written out, defaults made explicit.
+- **↺ history** — every save, accepted agent edit, and run of the open file, kept in its state DB. Pick a snapshot, see what restoring would change, restore it into the editor. Rolling AWS back is then save, plan, run ([see below](#history--what-you-wrote-next-to-what-you-deployed)).
 - **✎ agent** (optional) — a drawer where you ask for a change in English ("add a Postgres database behind web") or a question ("why is cf blocked?"). Claude answers with a proposed file, shown as a diff you accept or discard. It only appears when the SDK is installed and a key is set ([see below](#the-agent--optional)).
 
 The SQLite state DB is created next to the infra file (`site.giac` → `site.db`).
@@ -179,6 +180,32 @@ Model and cost: `claude-opus-5-5` by default (`GRAPHIAC_AGENT_MODEL` to
 change it). The language is sent as a cached system prompt, so a request
 costs a few cents at most. Without a key nothing changes: the button never
 appears.
+
+## History — what you wrote, next to what you deployed
+
+The state DB has always recorded what is deployed. It now also records the
+source: a snapshot on every **save** (when the text changed), every
+**accepted agent edit** (with your request as the message), and every
+**run** (always, with the result — `+3 ~1` — as the message). That last one
+is the thing a git log cannot give you unless you commit before every run:
+the file exactly as it was when the infrastructure changed.
+
+It is deliberately not a version control system. Linear history, whole
+files, restore one. Use git for everything else.
+
+Rollback has no special machinery. Restore a snapshot into the editor, save,
+plan, run — the planner computes the way back, the same as any other change.
+From the CLI:
+
+```bash
+python -m GraphIaC <profile> --infra_file site.giac history          # the list
+python -m GraphIaC <profile> --infra_file site.giac history --at 7 > site.giac
+python -m GraphIaC <profile> --infra_file site.giac run
+```
+
+With `--state s3://…` only run snapshots are recorded: they ride the run's
+publish, while a save never touches S3. (If you also keep source in a
+versioned bucket, as the hosted UI does, S3 already has the rest.)
 
 ## Headless CLI (no UI)
 
