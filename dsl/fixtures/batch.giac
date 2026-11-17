@@ -1,0 +1,23 @@
+# A lab's batch queue: Spot capacity in a private network, one job shape,
+# and the bucket it may touch.
+region = "us-east-2"
+
+net : Vpc(az_count: 2)
+
+spot : BatchComputeEnv(capacity: "spot", max_vcpus: 256, root_volume_gb: 200,
+                       vpc_id: net.vpc_id, subnet_ids: net.private_subnet_ids,
+                       tags: {project: "lab"})
+queue : BatchJobQueue(priority: 10)
+
+job-role : EcsTaskRole
+data     : S3Bucket("lab-data", region: region)
+align    : BatchJobDef(image: "quay.io/biocontainers/bwa:0.7.17--he4a0461_11",
+                       vcpus: 4, memory_mb: 16384, retry_attempts: 3,
+                       timeout_seconds: 7200, env: {REF: "s3://lab-data/ref/hg38.fa"})
+
+spot     -> queue
+job-role -> align
+align    -> data : (access: "readwrite")
+
+? batch-private(spot)
+? default-sg-empty(net)

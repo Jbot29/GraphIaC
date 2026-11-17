@@ -128,6 +128,25 @@ bucket : S3Bucket("begrif-co-site")
 
 All other args are named.
 
+### Existing resources — a node that only refers
+
+Not everything has to be born inside the tool. A node type may offer a
+reference mode — today `Vpc(existing: true, vpc_id: "vpc-…")`, or
+`Vpc(existing: true)` for the account's default VPC — meaning *this already
+exists; read it, connect to it, never create, update or delete it*. The
+planner IMPORTs it the first time it is seen, treats AWS as the truth
+thereafter, reports it BLOCKED (not CREATE) when it cannot be found, and
+when the node leaves the file only forgets it. Attribute references into a
+reference node work exactly as into any other:
+
+```
+net : Vpc(existing: true)
+web : EcsService(vpc_id: net.vpc_id, subnet_ids: net.public_subnet_ids, …)
+```
+
+This is a property of the node class (`is_reference()`), not of the
+language — the DSL just passes the field through.
+
 ---
 
 ## Edges — the arrow
@@ -200,6 +219,9 @@ A bare node label used as a value (like `role` above) resolves to that node's
 | `EcsCluster`           | `EcsService`           | `ClusterServiceEdge`          |
 | `EcsTaskRole`          | `EcsService`           | `IAMRoleEcsEdge`              |
 | `EcsService`           | `RDSPostgres`          | `EcsRdsEdge`                  |
+| `BatchComputeEnv`      | `BatchJobQueue`        | `BatchEnvQueueEdge` ⊘         |
+| `EcsTaskRole`          | `BatchJobDef`          | `IAMRoleBatchEdge`            |
+| `BatchJobDef`          | `S3Bucket`             | `BatchS3Edge`                 |
 
 This table is not hand-maintained in two places — it is generated from the
 registry (below).
@@ -382,8 +404,8 @@ failure mode too (2am, temp outage, you need the change through). A
 
 Predicates are a closed set, grown as examples need them (current:
 `private`, `https-only`, `locked-to`, `admin-only-signup`, `authed`,
-`cors-locked`, `db-private`). Signatures live in the generated registry
-like everything else.
+`cors-locked`, `db-private`, `default-sg-empty`, `batch-private`).
+Signatures live in the generated registry like everything else.
 
 ## Desugar — watching the edge dissolve
 

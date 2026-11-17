@@ -1,0 +1,14 @@
+# A network of your own, and chapter 5's stack placed inside it by reference.
+region = "us-east-2"
+
+net : Vpc(cidr: "10.0.0.0/16", az_count: 2, nat: "single",
+          endpoints: ["s3", "ecr.api", "ecr.dkr"], tags: {project: "lab"})
+
+lb : ALB(name: "lab-lb", region: region, vpc_id: net.vpc_id, subnet_ids: net.public_subnet_ids)
+db : RDSPostgres(name: "lab-db", region: region, vpc_id: net.vpc_id, subnet_ids: net.private_subnet_ids)
+
+# the one you already had — a reference, never created or deleted
+campus : Vpc(existing: true, vpc_id: "vpc-0123456789abcdef0", region: region)
+
+? default-sg-empty(net)
+? default-sg-empty(campus)

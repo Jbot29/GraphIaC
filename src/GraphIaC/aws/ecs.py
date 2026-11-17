@@ -36,6 +36,7 @@ from .ec2.network import (
     ensure_security_group,
     has_ingress,
     resolve_network,
+    subnets_map_public_ip,
     revoke_ingress,
 )
 from .iam_policy import IamTrustPolicyDocument, IamTrustPolicyStatement
@@ -165,7 +166,11 @@ class EcsService(BaseNode):
     # Public subnets + a public IP, so tasks reach ECR and Secrets Manager
     # without a NAT gateway. They are still unreachable from outside: the
     # security group has no ingress until `alb -> app` adds one.
-    assign_public_ip: bool = True
+    # Unset means "whatever the subnets do": public IPs in subnets that
+    # map them on launch (the default VPC — how Fargate reaches ECR with no
+    # NAT), none in private subnets (a `Vpc` node's private tier, where a
+    # public IP would be a trap: assigned, unroutable, image pull fails).
+    assign_public_ip: Optional[bool] = None
     log_retention_days: int = 30
 
     vpc_id: Optional[str] = None
@@ -269,7 +274,15 @@ class EcsService(BaseNode):
 
         network = (svc.get("networkConfiguration") or {}).get("awsvpcConfiguration") or {}
         sgs = network.get("securityGroups") or []
+        vpc_id = None
+        if network.get("subnets"):
+            try:
+                ec2 = session.client("ec2", region_name=region)
+                vpc_id = ec2.describe_subnets(SubnetIds=network["subnets"][:1])["Subnets"][0]["VpcId"]
+            except (ClientError, IndexError, KeyError) as e:
+                logger.debug(f"Could not resolve VPC for {read_id}: {e}")
         return cls(
+            vpc_id=vpc_id,
             g_id=g_id, name=read_id, region=region,
             image=image, container_port=port, cpu=str(cpu), memory=str(memory), env=env,
             desired_count=svc.get("desiredCount", 1),
@@ -350,6 +363,8 @@ class EcsService(BaseNode):
             logger.error(f"{self.name}: no usable subnets in {self.region}")
             return False
         self.vpc_id, self.subnet_ids = vpc_id, subnet_ids
+        if self.assign_public_ip is None:
+            self.assign_public_ip = subnets_map_public_ip(session, self.region, subnet_ids)
 
         self.security_group_id = ensure_security_group(
             session, self.region, self.sg_name,

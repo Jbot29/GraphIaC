@@ -41,6 +41,10 @@ NAME_FIELDS = {
     "ApiSite": "site_name",
     "ApiEndpoint": "endpoint_name",
     "CloudFrontFunction": "name",
+    "Vpc": "name",
+    "BatchComputeEnv": "name",
+    "BatchJobQueue": "name",
+    "BatchJobDef": "name",
     "ALB": "name",
     "EcsCluster": "name",
     "EcsService": "name",
@@ -72,6 +76,10 @@ EDGE_ENDPOINTS = {
     "IAMRoleEcsEdge": ("EcsTaskRole", "role_g_id", "EcsService", "service_g_id"),
     "AlbEcsEdge": ("ALB", "alb_g_id", "EcsService", "ecs_g_id"),
     "EcsRdsEdge": ("EcsService", "ecs_g_id", "RDSPostgres", "rds_g_id"),
+    # the batch track
+    "BatchEnvQueueEdge": ("BatchComputeEnv", "env_g_id", "BatchJobQueue", "queue_g_id"),
+    "IAMRoleBatchEdge": ("EcsTaskRole", "role_g_id", "BatchJobDef", "jobdef_g_id"),
+    "BatchS3Edge": ("BatchJobDef", "jobdef_g_id", "S3Bucket", "bucket_g_id"),
 }
 
 REGISTRY_JS_PATH = Path(__file__).parent / "web" / "registry.js"

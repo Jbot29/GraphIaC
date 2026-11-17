@@ -135,6 +135,11 @@ class RDSPostgres(BaseNode):
             backup_retention_days=db.get("BackupRetentionPeriod", 0),
             deletion_protection=db.get("DeletionProtection", False),
             vpc_id=(db.get("DBSubnetGroup") or {}).get("VpcId"),
+            # AZ order, matching what a Vpc node hands out — so a file that
+            # places the database by reference doesn't diff forever.
+            subnet_ids=[s["SubnetIdentifier"] for s in sorted(
+                (db.get("DBSubnetGroup") or {}).get("Subnets", []),
+                key=lambda s: ((s.get("SubnetAvailabilityZone") or {}).get("Name", ""), s["SubnetIdentifier"]))] or None,
             endpoint=(db.get("Endpoint") or {}).get("Address"),
             status=db.get("DBInstanceStatus"),
             arn=db.get("DBInstanceArn"),

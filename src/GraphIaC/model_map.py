@@ -1,4 +1,12 @@
 from GraphIaC.aws.apigateway import ApiEndpoint, ApiSite, EndpointLambdaEdge, SiteEndpointEdge
+from GraphIaC.aws.batch import (
+    BatchComputeEnv,
+    BatchEnvQueueEdge,
+    BatchJobDef,
+    BatchJobQueue,
+    BatchS3Edge,
+    IAMRoleBatchEdge,
+)
 from GraphIaC.aws.certificate import ACMCertificate, ACMCertificateHostedZoneEdge
 from GraphIaC.aws.cloudfront import (
     ACMCertificateCloudFrontEdge,
@@ -17,6 +25,7 @@ from GraphIaC.aws.cognito import (
 from GraphIaC.aws.deploy_role import DeployRole
 from GraphIaC.aws.dynamodb import DynamoTable
 from GraphIaC.aws.ec2.alb import ALB, ACMCertificateALBEdge, ALBRoute53Edge
+from GraphIaC.aws.ec2.vpc import Vpc
 from GraphIaC.aws.ecs import (
     AlbEcsEdge,
     ClusterServiceEdge,
@@ -56,6 +65,13 @@ BASE_MODEL_MAP = {
     "LambdaZipFile": LambdaZipFile,
     "SiteEndpointEdge": SiteEndpointEdge,
     "EndpointLambdaEdge": EndpointLambdaEdge,
+    "Vpc": Vpc,
+    "BatchComputeEnv": BatchComputeEnv,
+    "BatchJobQueue": BatchJobQueue,
+    "BatchJobDef": BatchJobDef,
+    "BatchEnvQueueEdge": BatchEnvQueueEdge,
+    "IAMRoleBatchEdge": IAMRoleBatchEdge,
+    "BatchS3Edge": BatchS3Edge,
     "ALB": ALB,
     "ACMCertificateALBEdge": ACMCertificateALBEdge,
     "ALBRoute53Edge": ALBRoute53Edge,

@@ -108,6 +108,54 @@ return {
         "type": "ALB"
       }
     },
+    "BatchEnvQueueEdge": {
+      "dest": {
+        "field": "queue_g_id",
+        "type": "BatchJobQueue"
+      },
+      "fields": {
+        "env_g_id": {
+          "required": true
+        },
+        "order": {
+          "default": 1,
+          "required": false
+        },
+        "queue_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "env_g_id",
+        "type": "BatchComputeEnv"
+      }
+    },
+    "BatchS3Edge": {
+      "dest": {
+        "field": "bucket_g_id",
+        "type": "S3Bucket"
+      },
+      "fields": {
+        "access": {
+          "default": "readwrite",
+          "required": false
+        },
+        "bucket_g_id": {
+          "required": true
+        },
+        "jobdef_g_id": {
+          "required": true
+        },
+        "role_g_id": {
+          "default": null,
+          "required": false
+        }
+      },
+      "source": {
+        "field": "jobdef_g_id",
+        "type": "BatchJobDef"
+      }
+    },
     "CloudFrontFunctionEdge": {
       "dest": {
         "field": "cf_g_id",
@@ -264,6 +312,24 @@ return {
       "source": {
         "field": "endpoint_node_g_id",
         "type": "ApiEndpoint"
+      }
+    },
+    "IAMRoleBatchEdge": {
+      "dest": {
+        "field": "jobdef_g_id",
+        "type": "BatchJobDef"
+      },
+      "fields": {
+        "jobdef_g_id": {
+          "required": true
+        },
+        "role_g_id": {
+          "required": true
+        }
+      },
+      "source": {
+        "field": "role_g_id",
+        "type": "EcsTaskRole"
       }
     },
     "IAMRoleEcsEdge": {
@@ -509,6 +575,180 @@ return {
       "isa": null,
       "nameField": "site_name"
     },
+    "BatchComputeEnv": {
+      "fields": {
+        "arn": {
+          "default": null,
+          "required": false
+        },
+        "capacity": {
+          "default": "spot",
+          "required": false
+        },
+        "instance_profile_arn": {
+          "default": null,
+          "required": false
+        },
+        "instance_types": {
+          "default": null,
+          "required": false
+        },
+        "launch_template_id": {
+          "default": null,
+          "required": false
+        },
+        "max_vcpus": {
+          "default": 256,
+          "required": false
+        },
+        "min_vcpus": {
+          "default": null,
+          "required": false
+        },
+        "name": {
+          "required": true
+        },
+        "region": {
+          "default": "us-east-2",
+          "required": false
+        },
+        "root_volume_gb": {
+          "default": null,
+          "required": false
+        },
+        "security_group_id": {
+          "default": null,
+          "required": false
+        },
+        "state": {
+          "default": null,
+          "required": false
+        },
+        "status": {
+          "default": null,
+          "required": false
+        },
+        "subnet_ids": {
+          "default": null,
+          "required": false
+        },
+        "tags": {
+          "default": {},
+          "required": false
+        },
+        "vpc_id": {
+          "default": null,
+          "required": false
+        }
+      },
+      "isa": null,
+      "nameField": "name"
+    },
+    "BatchJobDef": {
+      "fields": {
+        "arn": {
+          "default": null,
+          "required": false
+        },
+        "command": {
+          "default": [],
+          "required": false
+        },
+        "env": {
+          "default": {},
+          "required": false
+        },
+        "gpus": {
+          "default": null,
+          "required": false
+        },
+        "image": {
+          "required": true
+        },
+        "log_retention_days": {
+          "default": 30,
+          "required": false
+        },
+        "memory_mb": {
+          "default": 2048,
+          "required": false
+        },
+        "name": {
+          "required": true
+        },
+        "platform": {
+          "default": "ec2",
+          "required": false
+        },
+        "region": {
+          "default": "us-east-2",
+          "required": false
+        },
+        "retry_attempts": {
+          "default": 1,
+          "required": false
+        },
+        "revision": {
+          "default": null,
+          "required": false
+        },
+        "role_arn": {
+          "default": null,
+          "required": false
+        },
+        "tags": {
+          "default": {},
+          "required": false
+        },
+        "timeout_seconds": {
+          "default": null,
+          "required": false
+        },
+        "vcpus": {
+          "default": 1,
+          "required": false
+        }
+      },
+      "isa": null,
+      "nameField": "name"
+    },
+    "BatchJobQueue": {
+      "fields": {
+        "arn": {
+          "default": null,
+          "required": false
+        },
+        "compute_env_arns": {
+          "default": null,
+          "required": false
+        },
+        "name": {
+          "required": true
+        },
+        "priority": {
+          "default": 10,
+          "required": false
+        },
+        "region": {
+          "default": "us-east-2",
+          "required": false
+        },
+        "state": {
+          "default": null,
+          "required": false
+        },
+        "status": {
+          "default": null,
+          "required": false
+        },
+        "tags": {
+          "default": {},
+          "required": false
+        }
+      },
+      "isa": null,
+      "nameField": "name"
+    },
     "CloudFrontDistribution": {
       "fields": {
         "arn": {
@@ -739,7 +979,7 @@ return {
     "EcsService": {
       "fields": {
         "assign_public_ip": {
-          "default": true,
+          "default": null,
           "required": false
         },
         "cluster_name": {
@@ -1058,6 +1298,85 @@ return {
       },
       "isa": null,
       "nameField": null
+    },
+    "Vpc": {
+      "fields": {
+        "az_count": {
+          "default": 2,
+          "required": false
+        },
+        "cidr": {
+          "default": "10.0.0.0/16",
+          "required": false
+        },
+        "default_sg_id": {
+          "default": null,
+          "required": false
+        },
+        "endpoint_ids": {
+          "default": null,
+          "required": false
+        },
+        "endpoints": {
+          "default": [
+            "s3"
+          ],
+          "required": false
+        },
+        "existing": {
+          "default": false,
+          "required": false
+        },
+        "igw_id": {
+          "default": null,
+          "required": false
+        },
+        "name": {
+          "required": true
+        },
+        "nat": {
+          "default": "none",
+          "required": false
+        },
+        "nat_gateway_ids": {
+          "default": null,
+          "required": false
+        },
+        "private_subnet_ids": {
+          "default": null,
+          "required": false
+        },
+        "private_subnets": {
+          "default": true,
+          "required": false
+        },
+        "public_subnet_ids": {
+          "default": null,
+          "required": false
+        },
+        "public_subnets": {
+          "default": true,
+          "required": false
+        },
+        "region": {
+          "default": "us-east-2",
+          "required": false
+        },
+        "state": {
+          "default": null,
+          "required": false
+        },
+        "tags": {
+          "default": {},
+          "required": false
+        },
+        "vpc_id": {
+          "default": null,
+          "required": false
+        }
+      },
+      "isa": null,
+      "nameField": "name"
     }
   },
   "predicates": {
@@ -1073,6 +1392,12 @@ return {
       ],
       "doc": "if the function has a public URL, Cognito auth is wired into it"
     },
+    "batch-private": {
+      "args": [
+        "BatchComputeEnv"
+      ],
+      "doc": "the compute environment's instances take no ingress from the internet and no public IPs"
+    },
     "cors-locked": {
       "args": [
         "ApiSite"
@@ -1084,6 +1409,12 @@ return {
         "RDSPostgres"
       ],
       "doc": "the database has no public address and no open-to-the-world ingress"
+    },
+    "default-sg-empty": {
+      "args": [
+        "Vpc"
+      ],
+      "doc": "the VPC's default security group permits nothing (CIS 5.3)"
     },
     "https-only": {
       "args": [

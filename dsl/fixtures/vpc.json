@@ -1,0 +1,95 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "net",
+        "type": "Vpc",
+        "fields": {
+          "cidr": "10.0.0.0/16",
+          "az_count": 2,
+          "nat": "single",
+          "endpoints": [
+            "s3",
+            "ecr.api",
+            "ecr.dkr"
+          ],
+          "tags": {
+            "project": "lab"
+          },
+          "name": "net"
+        },
+        "line": 4
+      },
+      {
+        "g_id": "lb",
+        "type": "ALB",
+        "fields": {
+          "name": "lab-lb",
+          "region": "us-east-2",
+          "vpc_id": {
+            "$ref": {
+              "g_id": "net",
+              "field": "vpc_id"
+            }
+          },
+          "subnet_ids": {
+            "$ref": {
+              "g_id": "net",
+              "field": "public_subnet_ids"
+            }
+          }
+        },
+        "line": 7
+      },
+      {
+        "g_id": "db",
+        "type": "RDSPostgres",
+        "fields": {
+          "name": "lab-db",
+          "region": "us-east-2",
+          "vpc_id": {
+            "$ref": {
+              "g_id": "net",
+              "field": "vpc_id"
+            }
+          },
+          "subnet_ids": {
+            "$ref": {
+              "g_id": "net",
+              "field": "private_subnet_ids"
+            }
+          }
+        },
+        "line": 8
+      },
+      {
+        "g_id": "campus",
+        "type": "Vpc",
+        "fields": {
+          "existing": true,
+          "vpc_id": "vpc-0123456789abcdef0",
+          "region": "us-east-2",
+          "name": "campus"
+        },
+        "line": 11
+      }
+    ],
+    "edges": [],
+    "guards": [
+      {
+        "predicate": "default-sg-empty",
+        "args": [
+          "net"
+        ],
+        "line": 13
+      },
+      {
+        "predicate": "default-sg-empty",
+        "args": [
+          "campus"
+        ],
+        "line": 14
+      }
+    ]
+  }
+}
