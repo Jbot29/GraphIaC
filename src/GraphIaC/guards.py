@@ -75,6 +75,14 @@ PREDICATES = {
         "args": ["RDSPostgres"],
         "doc": "the database has no public address and no open-to-the-world ingress",
     },
+    "default-sg-empty": {
+        "args": ["Vpc"],
+        "doc": "the VPC's default security group permits nothing (CIS 5.3)",
+    },
+    "batch-private": {
+        "args": ["BatchComputeEnv"],
+        "doc": "the compute environment's instances take no ingress from the internet and no public IPs",
+    },
 }
 
 
@@ -322,6 +330,71 @@ def _check_db_private(session, nodes, db_id):
     return ("pass", f"private address, tcp/{port} open to {sources} security group(s)")
 
 
+def _check_default_sg_empty(session, nodes, vpc_id):
+    """The default security group is where things land when nobody chose a
+    group. AWS ships it allowing all traffic between its members and all
+    egress; CIS 5.3 says strip it so an omission is unreachable, not open.
+    Finds the VPC the same way an auditor would: by id if the file has one,
+    by the Name/ManagedBy tags GraphIaC writes otherwise, or the account's
+    default VPC for an `existing: true` reference with no id."""
+    region = _field(nodes, vpc_id, "region") or "us-east-2"
+    ec2 = session.client("ec2", region_name=region)
+    live_id = _field(nodes, vpc_id, "vpc_id")
+    if live_id:
+        try:
+            vpcs = ec2.describe_vpcs(VpcIds=[live_id])["Vpcs"]
+        except ClientError:
+            vpcs = []
+    elif _field(nodes, vpc_id, "existing"):
+        vpcs = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
+    else:
+        vpcs = ec2.describe_vpcs(Filters=[
+            {"Name": "tag:Name", "Values": [_field(nodes, vpc_id, "name") or vpc_id]},
+            {"Name": "tag:ManagedBy", "Values": ["GraphIaC"]},
+        ])["Vpcs"]
+    if not vpcs:
+        return "pending", "VPC not found yet"
+    groups = ec2.describe_security_groups(Filters=[
+        {"Name": "vpc-id", "Values": [vpcs[0]["VpcId"]]},
+        {"Name": "group-name", "Values": ["default"]},
+    ])["SecurityGroups"]
+    if not groups:
+        return "pending", "default security group not found"
+    sg = groups[0]
+    n_in, n_out = len(sg.get("IpPermissions", [])), len(sg.get("IpPermissionsEgress", []))
+    if n_in or n_out:
+        return "fail", f"default group {sg['GroupId']} has {n_in} ingress and {n_out} egress rule(s)"
+    return "pass", f"default group {sg['GroupId']} has no rules"
+
+
+def _check_batch_private(session, nodes, env_id):
+    """Batch instances are workers: nothing should be able to reach them,
+    and behind a boundary they should not carry public addresses. Reads
+    the live environment's groups and subnets directly."""
+    region = _field(nodes, env_id, "region") or "us-east-2"
+    name = _field(nodes, env_id, "name") or env_id
+    batch = session.client("batch", region_name=region)
+    envs = [e for e in batch.describe_compute_environments(computeEnvironments=[name])["computeEnvironments"]
+            if e.get("status") != "DELETED"]
+    if not envs:
+        return "pending", "compute environment not created yet"
+    cr = envs[0].get("computeResources") or {}
+    ec2 = session.client("ec2", region_name=region)
+    problems = []
+    for sg in ec2.describe_security_groups(GroupIds=cr.get("securityGroupIds") or [])["SecurityGroups"]:
+        for perm in sg.get("IpPermissions", []):
+            if any(r.get("CidrIp") == "0.0.0.0/0" for r in perm.get("IpRanges", [])):
+                problems.append(f"{sg['GroupId']} admits 0.0.0.0/0 on {perm.get('FromPort', 'all')}")
+    if cr.get("type") in ("SPOT", "EC2") and cr.get("subnets"):
+        public = [s["SubnetId"] for s in ec2.describe_subnets(SubnetIds=cr["subnets"])["Subnets"]
+                  if s.get("MapPublicIpOnLaunch")]
+        if public:
+            problems.append(f"subnet(s) assign public IPs: {', '.join(public)}")
+    if problems:
+        return "fail", "; ".join(problems)
+    return "pass", "no ingress from the internet, no public IPs"
+
+
 _CHECKS = {
     "private": _check_private,
     "https-only": _check_https_only,
@@ -330,6 +403,8 @@ _CHECKS = {
     "authed": _check_authed,
     "cors-locked": _check_cors_locked,
     "db-private": _check_db_private,
+    "default-sg-empty": _check_default_sg_empty,
+    "batch-private": _check_batch_private,
 }
 
 

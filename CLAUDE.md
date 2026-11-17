@@ -53,7 +53,7 @@ Six public functions form the user-facing API: `init()`, `add_node()`, `add_edge
 
 - `init(session, db_conn)` → `GraphIaCState`: creates a NetworkX DiGraph and connects to the SQLite state DB
 - `plan(state)`: reads current AWS state for every node/edge via boto3, diffs against the local DB, returns a list of `(operation, item)` tuples where operation ∈ `{CREATE, UPDATE, DELETE, IMPORT}`
-- `run(state)`: executes the plan — order is CREATE then UPDATE then DELETE
+- `run(state)`: executes the plan — order is CREATE then UPDATE then DELETE. An UPDATE's object is the **code model merged with live ids**: every field the file set wins, every field it left unset (ARNs, endpoints, status) is filled from `read()`. `update()` implementations can therefore rely on both `self.<desired field>` and `self.<aws id>`.
 - `verify(state)`: independent security/config audit — reads live AWS state for every node and edge, calls each object's `verify()` method, prints pass/fail results, returns total failure count (for exit-code CI gating)
 - `export_graph(state)`: renders the graph as a Graphviz DOT/PNG diagram
 
@@ -107,11 +107,15 @@ Current node inventory by service:
 - **API Gateway** (`apigateway.py`): `ApiSite`, `ApiEndpoint`
 - **SES** (`ses.py`): `SESDomainIdentity`
 - **Cognito** (`cognito.py`): `CognitoUserPool`, `CognitoUserPoolClient` (metadata-only node; `CognitoPoolClientEdge` provisions the app client; `CognitoLambdaAuthEdge` wires COGNITO_* env into a Lambda so its runtime can authenticate users — see `examples/lambda-ui/`)
+- **VPC** (`ec2/vpc.py`): `Vpc` — public + private subnet tiers per AZ, IGW, `nat: none|single|per-az`, gateway/interface `endpoints`, default SG stripped (CIS 5.3), tags on everything. Other nodes join by attribute reference (`subnet_ids: net.private_subnet_ids`), so they are BLOCKED until it is ready. `existing: true` makes it a **reference node** (see below). See `examples/private-network/`.
+- **Batch** (`batch.py`): `BatchComputeEnv` (`capacity: spot|on-demand|fargate|fargate-spot`; owns its SG, instance role/profile, launch template with `root_volume_gb`, the service-linked role, and instance tags), `BatchJobQueue`, `BatchJobDef` (immutable — update = new revision; log group with retention). Edges: `BatchEnvQueueEdge` ⊘ (`env -> queue`, gates the queue until the env is VALID), `IAMRoleBatchEdge` (`EcsTaskRole -> jobdef`, the ECS task execution policy — a Batch job is an ECS task), `BatchS3Edge` (`jobdef -> bucket`, inline policy, `access: read|readwrite`). Verify reads the Spot/On-Demand vCPU quota when it can. See `examples/batch-lab/`.
 - **ALB** (`ec2/alb.py`): `ALB` (+ `ACMCertificateALBEdge` ⊘ for the HTTPS listener, `ALBRoute53Edge` for the A alias)
 - **ECS / ECR** (`ecs.py`): `EcsCluster`, `EcsTaskRole` (isa `IAMRole`, ECS trust policy), `EcsService` (owns its task definition — no separate node), `EcrRepository`; edges `ClusterServiceEdge`, `IAMRoleEcsEdge`, `AlbEcsEdge`
 - **RDS** (`rds.py`): `RDSPostgres` (`ManageMasterUserPassword` — credentials live only in Secrets Manager) + `EcsRdsEdge`
 
-**Security groups are not a node type** (`ec2/network.py`). Each compute node (ALB, EcsService, RDSPostgres) creates and destroys exactly one group named after itself; the *edges* open ports between them (`alb -> web`, `web -> db`). A group with no rules is meaningless and its rules are always about a relationship — so the relationship owns them. `network.py` also holds default-VPC discovery: nodes leave `vpc_id`/`subnet_ids` unset and get the account's default VPC, which keeps Fargate reachable without a NAT gateway.
+**Security groups are not a node type** (`ec2/network.py`). Each compute node (ALB, EcsService, RDSPostgres) creates and destroys exactly one group named after itself; the *edges* open ports between them (`alb -> web`, `web -> db`). A group with no rules is meaningless and its rules are always about a relationship — so the relationship owns them. `network.py` also holds default-VPC discovery: nodes leave `vpc_id`/`subnet_ids` unset and get the account's default VPC, which keeps Fargate reachable without a NAT gateway. `EcsService.assign_public_ip` is unset by default and follows the subnets (`subnets_map_public_ip`): public IP in the default VPC, none in a `Vpc` node's private tier.
+
+**Reference-only nodes.** `BaseNode.is_reference()` (default False) marks a node that refers to something GraphIaC does not own — `Vpc(existing: true, vpc_id: …)`, or `Vpc(existing: true)` for the default VPC. `plan()` IMPORTs it when first seen, never emits UPDATE for it (AWS is the truth), reports it BLOCKED rather than CREATE when `read()` finds nothing, and when it leaves the file emits a DELETE that `run()` turns into forgetting the DB row without calling `delete()`. Infrastructure does not have to be born inside the tool to be wired by it; new node types with a natural "already exists" mode should implement this rather than invent their own flag semantics.
 
 ### Two-Phase Pattern for Long-Running Resources
 
@@ -164,7 +168,7 @@ Shared `colorlog` setup. Call `setup_logger()` in new modules rather than callin
 
 ### Guards (`src/GraphIaC/guards.py`)
 
-`? predicate(label, ...)` statements in `.giac` files declare safety invariants (`? private(bucket)`). **Independence rule: predicates are raw boto3 only — never call node/edge class code.** Signatures in `PREDICATES` flow into the generated registry so both parsers validate at parse time. `verify` counts guard failures (exit 1); `run` reports them after applying but never blocks (warn-only by design; `--strict` is future). Pass/fail/pending states — pending = target not created yet. Current set: `private`, `https-only`, `locked-to`, `admin-only-signup`, `authed`, `cors-locked`, `db-private`. New predicates: add to `PREDICATES` + `_CHECKS`, regenerate the registry, cover pass/fail/pending in `tests/test_guards.py`.
+`? predicate(label, ...)` statements in `.giac` files declare safety invariants (`? private(bucket)`). **Independence rule: predicates are raw boto3 only — never call node/edge class code.** Signatures in `PREDICATES` flow into the generated registry so both parsers validate at parse time. `verify` counts guard failures (exit 1); `run` reports them after applying but never blocks (warn-only by design; `--strict` is future). Pass/fail/pending states — pending = target not created yet. Current set: `private`, `https-only`, `locked-to`, `admin-only-signup`, `authed`, `cors-locked`, `db-private`, `default-sg-empty`, `batch-private`. New predicates: add to `PREDICATES` + `_CHECKS`, regenerate the registry, cover pass/fail/pending in `tests/test_guards.py`.
 
 ### Deploy Policy Generation (`src/GraphIaC/deploy_policy.py`)
 

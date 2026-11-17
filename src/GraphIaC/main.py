@@ -104,6 +104,19 @@ def plan(state, blocked=None):
         current_state = pn.read(state.session, state.G, g_id=pn.g_id, read_id=pn.read_id)
 
         if not current_state:
+            if pn.is_reference():
+                # Not ours to create. Report it the way an unresolvable
+                # upstream is reported; dependents are already BLOCKED via refs.
+                from GraphIaC.dsl import BlockedItem
+
+                reason = "referenced resource not found"
+                logger.plan(f"  ⊘ {cls_name} [{pn.g_id}]  BLOCKED — {reason}")
+                plan_ops.append(Operation(operation=OperationType.BLOCKED,
+                                          obj=BlockedItem(g_id=pn.g_id, type=cls_name, reason=reason)))
+                row = get_node_by_id(state.db_conn, pn.g_id)
+                if row:
+                    db_nodes_seen.append(str(row[0]))
+                continue
             logger.plan(f"  + {cls_name} [{pn.g_id}]  will be created")
             plan_ops.append(Operation(operation=OperationType.CREATE, obj=pn))
             continue
@@ -113,17 +126,31 @@ def plan(state, blocked=None):
         if not pn_db_row:
             logger.plan(f"  ↳ {cls_name} [{pn.g_id}]  will be imported")
             plan_ops.append(Operation(operation=OperationType.IMPORT, obj=current_state))
+            state.G.nodes[node]["data"] = current_state
             continue
 
         db_nodes_seen.append(str(pn_db_row[0]))
         pn_last = load_model_from_db(state, pn_db_row[2], pn_db_row[3])
+
+        if pn.is_reference():
+            # AWS is the truth for something we don't manage: never UPDATE.
+            state.G.nodes[node]["data"] = current_state
+            continue
 
         if pn.diff(state.session, state.G, current_state) or pn.diff(
             state.session, state.G, pn_last
         ):
             summary = _diff_summary(pn_last, current_state)
             logger.plan(f"  ~ {cls_name} [{pn.g_id}]  will be updated{summary}")
-            plan_ops.append(Operation(operation=OperationType.UPDATE, obj=current_state))
+            # What update() applies is the code's intent, carrying the ids
+            # AWS assigned: every field the code set wins, every field it
+            # left unset (ARNs, endpoints, status) is filled from live.
+            live = current_state.model_dump()
+            desired = pn.model_copy(update={k: live[k] for k in live
+                                            if getattr(pn, k, None) is None and live[k] is not None})
+            plan_ops.append(Operation(operation=OperationType.UPDATE, obj=desired))
+            state.G.nodes[node]["data"] = desired
+            continue
 
         state.G.nodes[node]["data"] = current_state
 
@@ -155,7 +182,10 @@ def plan(state, blocked=None):
     for orphaned_node in db_get_rows_not_in_list(state.db_conn, "nodes", db_nodes_seen):
         on_last = load_model_from_db(state, orphaned_node[2], orphaned_node[3])
         cls_name = on_last.__class__.__name__
-        logger.plan(f"  - {cls_name} [{on_last.g_id}]  will be deleted")
+        if on_last.is_reference():
+            logger.plan(f"  - {cls_name} [{on_last.g_id}]  will be forgotten (a reference — the resource stays)")
+        else:
+            logger.plan(f"  - {cls_name} [{on_last.g_id}]  will be deleted")
         plan_ops.append(Operation(operation=OperationType.DELETE, obj=on_last))
 
     return plan_ops
@@ -211,8 +241,11 @@ def run(state, blocked=None):
             db_update_node(state.db_conn, obj)
 
         elif change.operation == OperationType.DELETE:
-            logger.info(f"  - [{obj.g_id}] deleting {cls_name}...")
-            obj.delete(state.session, state.G)
+            if obj.is_reference():
+                logger.info(f"  - [{obj.g_id}] forgetting {cls_name} (reference — not deleted)")
+            else:
+                logger.info(f"  - [{obj.g_id}] deleting {cls_name}...")
+                obj.delete(state.session, state.G)
             row_id = get_node_by_id(state.db_conn, obj.g_id)
             db_delete_row(state.db_conn, "nodes", row_id[0])
 

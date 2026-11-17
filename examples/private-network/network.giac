@@ -1,0 +1,83 @@
+# A network of your own — chapter 5's stack, moved behind a boundary.
+#
+#   internet -> ALB (public subnets)
+#            -> ECS Fargate tasks (private subnets, no public IPs)
+#            -> RDS Postgres (private subnets)
+#
+# Chapter 5 runs all of this in the account's default VPC and lets security
+# groups do the isolating. That is correct and cheap. This file is for the
+# day someone asks a *network* question — an auditor, a compliance framework
+# (NIST 800-171 wants boundaries you can draw), or a bill that shows NAT
+# data charges — and the answer should be one node, not a week.
+#
+#   python -m GraphIaC graphiac --infra_file network.giac run
+#
+# Expect two runs: the first builds the network (and the certificate and
+# database start their waits), the second places everything in it. Nothing
+# in this file changes between runs.
+#
+# Cost, honestly:
+#   nat: "none"     $0. Private subnets have no route to the internet. RDS
+#                   and anything that only talks to S3 (via the free gateway
+#                   endpoint) are perfectly happy here.
+#   nat: "single"   ~$32/month + $0.045/GB. One gateway, one AZ — if that
+#                   AZ fails, private subnets in the other lose egress.
+#   nat: "per-az"   that, times az_count. The production answer.
+#   interface endpoints ("ecr.api", "ecr.dkr", "logs", "secretsmanager")
+#                   ~$7.30/month each PER AZ. Fargate in private subnets
+#                   needs all four to start without a NAT: 4 × 2 AZs ≈
+#                   $58/month — more than one NAT. Use them when you want no
+#                   internet route at all; use a NAT when you want cheap.
+#
+# This file picks a single NAT and the S3 endpoint: the tasks can pull
+# images and reach Secrets Manager through the NAT, S3 traffic bypasses it.
+
+company  = "yourco"
+domain   = "${company}.com"
+app-host = "app.${domain}"
+region   = "us-east-2"
+
+net : Vpc(name: "${company}-net", region: region,
+          cidr: "10.0.0.0/16", az_count: 2,
+          nat: "single", endpoints: ["s3"],
+          tags: {project: company, env: "prod"})
+
+hz   : HostedZone(domain_name: domain)
+cert : ACMCertificate(domain_name: app-host, region: region, subject_alternative_names: [])
+
+images : EcrRepository(name: "${company}-web", region: region)
+
+# Every placement below is an attribute reference: a data dependency the
+# planner resolves from the live network. Until `net` exists these nodes
+# are BLOCKED, and once it does they land in the tier named here.
+lb : ALB(name: "${company}-lb", region: region,
+         vpc_id: net.vpc_id, subnet_ids: net.public_subnet_ids)
+
+db : RDSPostgres(name: "${company}-db", region: region, db_name: company,
+                 vpc_id: net.vpc_id, subnet_ids: net.private_subnet_ids)
+
+cluster   : EcsCluster(name: company, region: region)
+task-role : EcsTaskRole(name: "${company}-task-role")
+
+# No assign_public_ip here: the service follows its subnets. Private tier,
+# no public address — and the NAT is how it still reaches ECR.
+web : EcsService(name: "${company}-web", region: region,
+                 image: images.uri, container_port: 8000,
+                 cpu: "512", memory: "1024", desired_count: 2,
+                 vpc_id: net.vpc_id, subnet_ids: net.private_subnet_ids,
+                 env: {DATABASE_HOST: db.endpoint,
+                       DATABASE_NAME: company,
+                       DATABASE_USER: "postgres",
+                       PORT: "8000"})
+
+cert      -> hz
+cert      -> lb
+lb        -> hz : (domain_name: app-host)
+cluster   -> web
+task-role -> web
+lb        -> web : (health_check_path: "/healthz")
+web       -> db : (role_g_id: task-role)
+
+# --- declared invariants: independent checks, never the provisioning code ---
+? default-sg-empty(net)   # the VPC's default group permits nothing (CIS 5.3)
+? db-private(db)          # no public address, nothing open to 0.0.0.0/0

@@ -33,6 +33,18 @@ class BaseNode(BaseModel):
         """
         return True
 
+    def is_reference(self) -> bool:
+        """Does this node merely *refer to* something that already exists?
+
+        A reference node (e.g. `Vpc(existing: true)`) is read and connected
+        to but never created, updated, or deleted: plan() IMPORTs it when
+        first seen, treats AWS as the truth thereafter, reports it BLOCKED
+        when it cannot be found, and when it leaves the file only forgets
+        the DB row. Infrastructure does not have to be born inside the tool
+        to be wired by it.
+        """
+        return False
+
     @classmethod
     def read(self, session, G, g_id, read_id):
         pass

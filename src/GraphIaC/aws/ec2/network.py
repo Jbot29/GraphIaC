@@ -3,13 +3,15 @@
 Two decisions live in this file, and both are about not making a founder
 build a network before they can deploy an app.
 
-**No VPC of your own.** A fresh AWS account already has a default VPC with
-a public subnet in every availability zone. Fargate tasks placed there with
-`assignPublicIp` reach the internet — and ECR, and Secrets Manager —
-without a NAT gateway, which would otherwise add ~$32/month to a stack that
-hasn't served a request yet. Nodes take optional `vpc_id`/`subnet_ids`; when
-unset they discover the default. Real network isolation is a later chapter
-and a bigger bill.
+**No VPC of your own, until you want one.** A fresh AWS account already has
+a default VPC with a public subnet in every availability zone. Fargate
+tasks placed there with `assignPublicIp` reach the internet — and ECR, and
+Secrets Manager — without a NAT gateway, which would otherwise add
+~$32/month to a stack that hasn't served a request yet. Nodes take optional
+`vpc_id`/`subnet_ids`; when unset they discover the default. When you do
+want real isolation, `Vpc` (vpc.py) builds a network with public and
+private tiers, and nodes join it by attribute reference
+(`subnet_ids: net.private_subnet_ids`). Nothing in this file changes.
 
 **Security groups are not a node type.** A security group with no rules is
 meaningless, and its rules are always *about a relationship*: "the load
@@ -71,6 +73,17 @@ def default_subnets(session, region: str, vpc_id: str) -> List[str]:
     for subnet in resp.get("Subnets", []):
         by_az.setdefault(subnet["AvailabilityZone"], subnet["SubnetId"])
     return [by_az[az] for az in sorted(by_az)]
+
+
+def subnets_map_public_ip(session, region: str, subnet_ids: List[str]) -> bool:
+    """Do these subnets hand out public IPs on launch? True for the default
+    VPC's subnets and a Vpc node's public tier; False for its private tier.
+    Compute nodes with no explicit choice follow the subnet."""
+    if not subnet_ids:
+        return True
+    ec2 = session.client("ec2", region_name=region)
+    subnets = ec2.describe_subnets(SubnetIds=list(subnet_ids))["Subnets"]
+    return all(s.get("MapPublicIpOnLaunch", False) for s in subnets)
 
 
 def resolve_network(session, region: str, vpc_id=None, subnet_ids=None):

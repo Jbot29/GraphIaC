@@ -1,0 +1,129 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "g_id": "net",
+        "type": "Vpc",
+        "fields": {
+          "az_count": 2,
+          "name": "net"
+        },
+        "line": 5
+      },
+      {
+        "g_id": "spot",
+        "type": "BatchComputeEnv",
+        "fields": {
+          "capacity": "spot",
+          "max_vcpus": 256,
+          "root_volume_gb": 200,
+          "vpc_id": {
+            "$ref": {
+              "g_id": "net",
+              "field": "vpc_id"
+            }
+          },
+          "subnet_ids": {
+            "$ref": {
+              "g_id": "net",
+              "field": "private_subnet_ids"
+            }
+          },
+          "tags": {
+            "project": "lab"
+          },
+          "name": "spot"
+        },
+        "line": 7
+      },
+      {
+        "g_id": "queue",
+        "type": "BatchJobQueue",
+        "fields": {
+          "priority": 10,
+          "name": "queue"
+        },
+        "line": 10
+      },
+      {
+        "g_id": "job-role",
+        "type": "EcsTaskRole",
+        "fields": {
+          "name": "job-role"
+        },
+        "line": 12
+      },
+      {
+        "g_id": "data",
+        "type": "S3Bucket",
+        "fields": {
+          "bucket_name": "lab-data",
+          "region": "us-east-2"
+        },
+        "line": 13
+      },
+      {
+        "g_id": "align",
+        "type": "BatchJobDef",
+        "fields": {
+          "image": "quay.io/biocontainers/bwa:0.7.17--he4a0461_11",
+          "vcpus": 4,
+          "memory_mb": 16384,
+          "retry_attempts": 3,
+          "timeout_seconds": 7200,
+          "env": {
+            "REF": "s3://lab-data/ref/hg38.fa"
+          },
+          "name": "align"
+        },
+        "line": 14
+      }
+    ],
+    "edges": [
+      {
+        "type": "BatchEnvQueueEdge",
+        "fields": {
+          "env_g_id": "spot",
+          "queue_g_id": "queue"
+        },
+        "inferred": true,
+        "line": 18
+      },
+      {
+        "type": "IAMRoleBatchEdge",
+        "fields": {
+          "role_g_id": "job-role",
+          "jobdef_g_id": "align"
+        },
+        "inferred": true,
+        "line": 19
+      },
+      {
+        "type": "BatchS3Edge",
+        "fields": {
+          "jobdef_g_id": "align",
+          "bucket_g_id": "data",
+          "access": "readwrite"
+        },
+        "inferred": true,
+        "line": 20
+      }
+    ],
+    "guards": [
+      {
+        "predicate": "batch-private",
+        "args": [
+          "spot"
+        ],
+        "line": 22
+      },
+      {
+        "predicate": "default-sg-empty",
+        "args": [
+          "net"
+        ],
+        "line": 23
+      }
+    ]
+  }
+}

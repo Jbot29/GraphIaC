@@ -1,0 +1,58 @@
+# A lab's batch queue — the executor your workflow engine submits to.
+#
+#   Nextflow / Snakemake / Cromwell
+#     -> AWS Batch job queue
+#     -> Spot instances in private subnets, scaled from zero
+#     -> images from ECR, data in S3, logs in CloudWatch
+#
+# This is the stack every bioinformatics group builds by hand on week one:
+# compute environment, queue, job definition, three IAM roles, a launch
+# template because the stock 30 GB root disk fills with containers, and a
+# security group. Here it is three nodes and three arrows, plus the network
+# from examples/private-network.
+#
+#   python -m GraphIaC graphiac --infra_file lab.giac run   # x3: network, environment, queue
+#   python -m GraphIaC graphiac --infra_file lab.giac verify
+#
+# Then point the engine at it (Nextflow shown in the README):
+#   process.executor = 'awsbatch'
+#   process.queue    = 'yourlab-queue'
+#   workDir          = 's3://yourlab-data/work'
+
+lab    = "yourlab"
+region = "us-east-2"
+
+net : Vpc(name: "${lab}-net", region: region, az_count: 2,
+          nat: "single",                 # how instances pull images; see README
+          endpoints: ["s3"],             # S3 traffic bypasses the NAT — free
+          tags: {project: lab})
+
+# Spot, scale-to-zero, 200 GB encrypted root volumes. Tags land on every
+# instance Batch launches, so the bill splits by `project` without anyone
+# tagging a machine.
+spot : BatchComputeEnv(name: "${lab}-spot", region: region,
+                       capacity: "spot", max_vcpus: 256, root_volume_gb: 200,
+                       vpc_id: net.vpc_id, subnet_ids: net.private_subnet_ids,
+                       tags: {project: lab})
+
+queue : BatchJobQueue(name: "${lab}-queue", region: region)
+
+images   : EcrRepository(name: "${lab}-tools", region: region)
+data     : S3Bucket("${lab}-data", region: region)
+job-role : EcsTaskRole(name: "${lab}-job-role")
+
+# One job shape as an example. A workflow engine registers its own job
+# definitions per process; this one is for `aws batch submit-job` by hand.
+align : BatchJobDef(name: "${lab}-align", region: region,
+                    image: "quay.io/biocontainers/bwa:0.7.17--he4a0461_11",
+                    vcpus: 8, memory_mb: 32768,
+                    retry_attempts: 3,            # Spot interruptions are retried
+                    timeout_seconds: 14400,
+                    env: {REF: "s3://${lab}-data/ref/hg38.fa"})
+
+spot     -> queue          # the queue dispatches here (⊘ waits until VALID)
+job-role -> align          # pull the image, write logs
+align    -> data           # read/write exactly this bucket
+
+? batch-private(spot)      # no ingress from the internet, no public IPs
+? default-sg-empty(net)    # CIS 5.3

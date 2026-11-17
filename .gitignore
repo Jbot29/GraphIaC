@@ -1,3 +1,10 @@
 __pycache__/
-*.py[cod]deployment.zip
+*.py[cod]
+deployment.zip
 .DS_Store
+dist/
+
+# local working notes and scripts at the repo root (examples/ keep theirs)
+/*.org
+/*.png
+/*.sh

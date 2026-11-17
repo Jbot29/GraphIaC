@@ -130,8 +130,11 @@ python -m GraphIaC graphiac --infra_file webapp.giac verify
 ```
 
 When you do need real isolation — private subnets, a NAT gateway, an audit
-that asks about network boundaries — set `vpc_id` and `subnet_ids` on the
-nodes and none of the rest of this file changes.
+that asks about network boundaries — add a `Vpc` node and point `vpc_id`
+and `subnet_ids` at it by reference (`subnet_ids: net.private_subnet_ids`).
+None of the rest of this file changes. That is
+[examples/private-network](../../private-network/), which is this chapter
+moved behind a boundary.
 
 ---
 
